@@ -7,26 +7,10 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { storageService } from './storageService';
 
+const BACKEND_TUNNEL_URL = 'https://channels-possibilities-chamber-hidden.trycloudflare.com';
+
 const getApiBaseUrl = () => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location && window.location.hostname) {
-    const host = window.location.hostname;
-    if (host && host !== 'localhost' && host !== '127.0.0.1') {
-      return `http://${host}:5000/api/auth`;
-    }
-  }
-
-  // Extract host IP dynamically from Expo hostUri (e.g. "192.168.1.101:8081")
-  const hostUri = Constants.expoConfig?.hostUri 
-    || Constants.manifest?.debuggerHost 
-    || Constants.manifest2?.extra?.expoGo?.debuggerHost || '';
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-      return `http://${ip}:5000/api/auth`;
-    }
-  }
-
-  return 'http://localhost:5000/api/auth';
+  return `${BACKEND_TUNNEL_URL}/api/auth`;
 };
 
 class AuthService {

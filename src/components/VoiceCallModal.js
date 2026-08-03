@@ -1,45 +1,142 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
-import { startAudioStream, stopAudioStream, unlockAudioContext } from '../services/audioStreamService';
+import { startAudioStream, stopAudioStream, unlockAudioContext, onAudioLevel, onCallLog } from '../services/audioStreamService';
 import { webrtcService } from '../services/webrtcService';
+import { trtcService } from '../services/trtcService';
 
-export default function VoiceCallModal({ visible, onClose, partnerName, userEmail, userName, partnerEmail }) {
-  const [callDuration, setCallDuration] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeaker, setIsSpeaker] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
+/**
+ * Isolated call timer — updates itself without re-rendering the parent
+ */
+const CallTimerDisplay = memo(function CallTimerDisplay({ visible }) {
+  const [duration, setDuration] = useState(0);
 
   useEffect(() => {
     if (!visible) {
-      setCallDuration(0);
+      setDuration(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setDuration(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [visible]);
+
+  const mins = Math.floor(duration / 60);
+  const secs = duration % 60;
+  const formatted = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+  return (
+    <Text style={styles.callStatus}>
+      🔴 TRTC Cloud Live • {formatted}
+    </Text>
+  );
+});
+
+/**
+ * Real-Time Audio Level Driven Visualizer
+ * Stays completely flat (height 3) when silent / user is not talking to mic.
+ * Animates wave bars based on actual microphone input volume when user speaks!
+ */
+const WaveformVisualizer = memo(function WaveformVisualizer({ isActive, isMuted }) {
+  const [bars, setBars] = useState(() => Array(20).fill(3));
+
+  useEffect(() => {
+    if (!isActive || isMuted) {
+      setBars(Array(20).fill(3));
+      return;
+    }
+
+    // Subscribe to live hardware mic volume level (0.0 to 1.0)
+    const unsubscribe = onAudioLevel((level) => {
+      if (level <= 0.02) {
+        // Absolute silence / user not talking -> flat line
+        setBars(Array(20).fill(3));
+      } else {
+        // User speaking into mic -> animate bars proportionally to voice loudness!
+        setBars(Array(20).fill(0).map(() => {
+          const barVol = level * (0.6 + Math.random() * 0.8);
+          return Math.max(3, Math.min(32, Math.floor(4 + barVol * 28)));
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isActive, isMuted]);
+
+  return (
+    <View style={styles.waveformRow}>
+      {bars.map((height, i) => (
+        <View
+          key={i}
+          style={[
+            styles.waveBar,
+            {
+              height,
+              backgroundColor: isMuted ? '#475569' : '#38BDF8',
+            }
+          ]}
+        />
+      ))}
+    </View>
+  );
+});
+
+export default function VoiceCallModal({ visible, onClose, partnerName, userEmail, userName, partnerEmail, isConnected: externalConnected }) {
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeaker, setIsSpeaker] = useState(false); // Default: earpiece like a real phone call
+  const [isConnected, setIsConnected] = useState(false);
+  const [callLogs, setCallLogs] = useState([]);
+
+  // Subscribe to live call diagnostics logs
+  useEffect(() => {
+    if (!visible) {
+      setCallLogs([]);
+      return;
+    }
+    const unsub = onCallLog((logMsg) => {
+      setCallLogs(prev => [logMsg, ...prev.slice(0, 30)]);
+    });
+    return unsub;
+  }, [visible]);
+
+  // Sync external connection state if passed
+  useEffect(() => {
+    if (externalConnected) {
+      setIsConnected(true);
+    }
+  }, [externalConnected]);
+
+  useEffect(() => {
+    if (!visible) {
       setIsConnected(false);
       stopAudioStream();
       webrtcService.close();
+      trtcService.exitRoom();
       return;
     }
 
     // Unlock browser / native audio policy
     unlockAudioContext();
 
-    // Configure audio mode for high volume playback & recording
+    // Configure audio mode - DEFAULT TO EARPIECE (not loudspeaker)
     Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
       staysActiveInBackground: true,
       shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: true, // earpiece by default
     }).catch(err => console.log('Audio mode error:', err));
 
-    // Live call timer
-    const timer = setInterval(() => {
-      setCallDuration(prev => prev + 1);
-    }, 1000);
-
-    // Start HTTP audio chunk streaming (reliable, works everywhere)
-    if (userEmail && partnerEmail) {
-      startAudioStream(userEmail, userName || userEmail, partnerEmail);
-      setIsConnected(true);
+    // Initialize Tencent TRTC Cloud Engine (SDKAppID: 20045905)
+    if (userEmail) {
+      const roomNum = (userEmail + partnerEmail).split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 1000);
+      trtcService.enterRoom({
+        roomId: roomNum,
+        userId: userEmail,
+        isVideo: false,
+      }).catch(err => console.log('[VoiceCall] TRTC room enter error:', err));
     }
 
     // Also attempt WebRTC P2P upgrade (instant latency if connection establishes)
@@ -52,36 +149,56 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
           webrtcService.createOffer(userEmail, partnerEmail);
         }
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      console.log('[VoiceCall] WebRTC not available, using HTTP streaming:', err.message);
+    });
 
     return () => {
-      clearInterval(timer);
       stopAudioStream();
       webrtcService.close();
+      trtcService.exitRoom();
     };
   }, [visible, userEmail, userName, partnerEmail]);
 
-  // Handle mute toggle
+  // Audio Stream lifecycle — ONLY start streaming when call is CONNECTED and NOT muted
   useEffect(() => {
-    if (isMuted) {
-      stopAudioStream();
-    } else if (visible && isConnected && userEmail && partnerEmail) {
+    if (visible && isConnected && userEmail && partnerEmail && !isMuted) {
       startAudioStream(userEmail, userName || userEmail, partnerEmail);
+    } else {
+      stopAudioStream();
     }
-  }, [isMuted]);
+  }, [visible, isConnected, isMuted, userEmail, userName, partnerEmail]);
 
-  if (!visible) return null;
-
-  const formatCallTime = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins < 10 ? '0' : ''}${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
-  };
-
-  const handleEndCall = () => {
+  const handleEndCall = useCallback(() => {
     stopAudioStream();
     onClose();
-  };
+  }, [onClose]);
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted(prev => !prev);
+  }, []);
+
+  const handleToggleSpeaker = useCallback(async () => {
+    const newSpeakerState = !isSpeaker;
+    setIsSpeaker(newSpeakerState);
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: !newSpeakerState,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: !newSpeakerState,
+        overrideOutputAudioPortIOS: newSpeakerState
+          ? Audio.OVERRIDE_SPEAKER_SPEAKER
+          : Audio.OVERRIDE_SPEAKER_NONE,
+      });
+      console.log(`[VoiceCall] Audio route: ${newSpeakerState ? 'LOUDSPEAKER' : 'EARPIECE'}`);
+    } catch (err) {
+      console.log('[VoiceCall] Audio route switch error:', err.message);
+    }
+  }, [isSpeaker]);
+
+  if (!visible) return null;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
@@ -100,9 +217,7 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
             <FontAwesome name="user" size={48} color="#38BDF8" />
           </View>
           <Text style={styles.peerName}>{partnerName || 'Peer Contact'}</Text>
-          <Text style={styles.callStatus}>
-            {isConnected ? '🔴 Live' : '⏳ Connecting...'} • {formatCallTime(callDuration)}
-          </Text>
+          {visible && <CallTimerDisplay visible={visible} />}
           {isConnected && (
             <View style={styles.liveBadge}>
               <View style={styles.liveDot} />
@@ -111,31 +226,30 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
           )}
         </View>
 
-        {/* Audio Visualizer Placeholder */}
+        {/* Audio Visualizer — isolated component, won't cause parent re-renders */}
         <View style={styles.visualizerCard}>
           <View style={styles.subHeader}>
             <FontAwesome name="microphone" size={14} color="#38BDF8" style={{ marginRight: 6 }} />
             <Text style={styles.subTitleText}>LIVE AUDIO STREAM</Text>
           </View>
-          <View style={styles.waveformRow}>
-            {[...Array(20)].map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.waveBar,
-                  {
-                    height: isConnected && !isMuted
-                      ? 8 + Math.random() * 24
-                      : 4,
-                    backgroundColor: isMuted ? '#475569' : '#38BDF8',
-                  }
-                ]}
-              />
-            ))}
-          </View>
+          <WaveformVisualizer isActive={isConnected} isMuted={isMuted} />
           <Text style={styles.streamInfo}>
             {isMuted ? '🔇 Microphone Muted' : isConnected ? '🎙️ Speaking... Audio is being streamed' : '⏳ Setting up audio channel...'}
           </Text>
+        </View>
+
+        {/* Live Call Diagnostic Log Console */}
+        <View style={styles.logCard}>
+          <Text style={styles.logHeaderTitle}>📋 Live Call Execution Logs</Text>
+          <ScrollView style={styles.logScrollView} nestedScrollEnabled={true}>
+            {callLogs.length === 0 ? (
+              <Text style={styles.emptyLogText}>Call logs will appear here during active stream...</Text>
+            ) : (
+              callLogs.map((logMsg, i) => (
+                <Text key={i} style={styles.logText}>{logMsg}</Text>
+              ))
+            )}
+          </ScrollView>
         </View>
 
         {/* Control Buttons Bar */}
@@ -143,7 +257,7 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
           {/* Mute Button */}
           <TouchableOpacity
             style={[styles.controlBtn, isMuted && styles.activeControlBtn]}
-            onPress={() => setIsMuted(prev => !prev)}
+            onPress={handleToggleMute}
           >
             <FontAwesome
               name={isMuted ? "microphone-slash" : "microphone"}
@@ -161,7 +275,7 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
           {/* Speaker Button */}
           <TouchableOpacity
             style={[styles.controlBtn, isSpeaker && styles.activeControlBtn]}
-            onPress={() => setIsSpeaker(prev => !prev)}
+            onPress={handleToggleSpeaker}
           >
             <FontAwesome
               name="volume-up"
@@ -181,8 +295,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0B0F19',
     justifyContent: 'space-between',
-    paddingVertical: 50,
-    paddingHorizontal: 20,
+    paddingVertical: 35,
+    paddingHorizontal: 16,
   },
   topBar: {
     alignItems: 'center',
@@ -192,96 +306,125 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   encryptedText: {
     color: '#10B981',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   peerSection: {
     alignItems: 'center',
+    marginVertical: 10,
   },
   avatarCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: '#1E293B',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
     borderWidth: 2,
     borderColor: '#38BDF8',
   },
   peerName: {
-    color: '#F8FAFC',
-    fontSize: 22,
+    color: '#FFFFFF',
+    fontSize: 20,
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   callStatus: {
     color: '#94A3B8',
-    fontSize: 14,
+    fontSize: 13,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginTop: 6,
   },
   liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#38BDF8',
     marginRight: 6,
   },
   liveText: {
-    color: '#10B981',
+    color: '#38BDF8',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   visualizerCard: {
-    backgroundColor: '#131C2E',
+    backgroundColor: '#1E293B',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
+    alignItems: 'center',
+    marginVertical: 6,
     borderWidth: 1,
-    borderColor: '#233048',
+    borderColor: '#334155',
   },
   subHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   subTitleText: {
-    color: '#38BDF8',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   waveformRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     height: 40,
-    marginBottom: 8,
+    gap: 3,
+    marginVertical: 6,
   },
   waveBar: {
     width: 4,
     borderRadius: 2,
-    backgroundColor: '#38BDF8',
   },
   streamInfo: {
     color: '#94A3B8',
     fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
+    marginTop: 4,
+  },
+  logCard: {
+    backgroundColor: '#020617',
+    borderRadius: 12,
+    padding: 10,
+    height: 140,
+    marginVertical: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  logHeaderTitle: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  logScrollView: {
+    flex: 1,
+  },
+  logText: {
+    color: '#34D399',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
+    marginBottom: 3,
+  },
+  emptyLogText: {
+    color: '#64748B',
+    fontStyle: 'italic',
+    fontSize: 11,
   },
   controlsRow: {
     flexDirection: 'row',

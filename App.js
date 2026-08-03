@@ -38,6 +38,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import FriendProfileScreen from './src/screens/FriendProfileScreen';
+import TestCallScreen from './src/screens/TestCallScreen';
 import BottomNavBar from './src/components/BottomNavBar';
 
 import { authService } from './src/services/authService';
@@ -47,7 +48,8 @@ import {
   fetchPeerMessages,
   fetchUserList,
   clearPeerMessages,
-  markPeerMessagesRead
+  markPeerMessagesRead,
+  getApiBaseUrl
 } from './src/services/translationService';
 import { translateWithGemini } from './src/services/geminiService';
 import {
@@ -59,13 +61,14 @@ import {
   stopRingtoneLoop
 } from './src/services/callService';
 import { voiceService } from './src/services/voiceService';
-import { playAudioChunk } from './src/services/audioStreamService';
+import { playAudioChunk, stopAudioStream } from './src/services/audioStreamService';
 import { webrtcService } from './src/services/webrtcService';
 import { getTheme } from './src/theme/colors';
 
 // Global caches for local voice note audio URIs & image URIs across polling cycles
 const localAudioCache = new Map();
 const localImageCache = new Map();
+const messageTranslationCache = new Map();
 const clearedCutoffMap = new Map();
 
 export default function App() {
@@ -100,13 +103,17 @@ export default function App() {
   const [isLangPickerVisible, setIsLangPickerVisible] = useState(false);
   const [isVoiceCallVisible, setIsVoiceCallVisible] = useState(false);
   const [isVideoCallVisible, setIsVideoCallVisible] = useState(false);
+  const [isCallConnected, setIsCallConnected] = useState(false);
   const [incomingCallData, setIncomingCallData] = useState(null);
   const [remoteVideoFrameUri, setRemoteVideoFrameUri] = useState(null);
   const activeCallIdRef = useRef(null);
   const handledCallSignalsRef = useRef(new Set());
   const isFirstCallPollRef = useRef(true);
+  const callRingingTimerRef = useRef(null);
+  const incomingCallTimerRef = useRef(null);
 
   const [isFriendProfileVisible, setIsFriendProfileVisible] = useState(false);
+  const [isTestCallVisible, setIsTestCallVisible] = useState(false);
   const [isMediaPickerVisible, setIsMediaPickerVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState(null);
 
@@ -164,6 +171,46 @@ export default function App() {
     initSession();
     return unsubscribe;
   }, []);
+
+  // ⚡ Live Real-Time WebSocket Connection (<20ms latency audio push)
+  useEffect(() => {
+    if (!currentUser?.email) return;
+
+    let ws = null;
+    let isSubscribed = true;
+
+    try {
+      const baseUrl = getApiBaseUrl();
+      const wsBase = baseUrl.replace('/api', '/ws').replace('https://', 'wss://').replace('http://', 'ws://');
+      const wsUrl = `${wsBase}?email=${encodeURIComponent(currentUser.email)}`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (e) => {
+        if (!isSubscribed) return;
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.data && msg.data.includes('[AUDIO_CHUNK:')) {
+            const startIdx = msg.data.indexOf('[AUDIO_CHUNK:') + '[AUDIO_CHUNK:'.length;
+            const endIdx = msg.data.lastIndexOf(']');
+            if (startIdx > 0 && endIdx > startIdx) {
+              const base64Data = msg.data.substring(startIdx, endIdx);
+              if (base64Data.length > 50) {
+                playAudioChunk(base64Data);
+              }
+            }
+          }
+        } catch (err) {}
+      };
+    } catch (err) {}
+
+    return () => {
+      isSubscribed = false;
+      if (ws) {
+        try { ws.close(); } catch (e) {}
+      }
+    };
+  }, [currentUser?.email]);
 
   const [allUsers, setAllUsers] = useState([]);
   const userListCacheRef = useRef([]);
@@ -233,7 +280,12 @@ export default function App() {
               continue;
             }
 
-            // Handle incoming live speech audio stream chunks (ONLY during active call!)
+            // Ignore any signal sent by OURSELVES to prevent infinite speaker/mic feedback loops!
+            if (m.senderEmail && m.senderEmail.toLowerCase() === currentUser.email.toLowerCase()) {
+              continue;
+            }
+
+            // Handle incoming live speech audio stream chunks (ONLY during active call & from partner!)
             if ((isVoiceCallVisible || isVideoCallVisible) && m.originalText.includes('[AUDIO_CHUNK:')) {
               const chunkKey = m.id ? `chunk_${m.id}` : `chunk_${m.timestamp}_${m.originalText.length}`;
               if (!handledCallSignalsRef.current.has(chunkKey)) {
@@ -311,6 +363,12 @@ export default function App() {
                   callType,
                 });
                 startRingtoneLoop('incoming');
+                // 30-second incoming call timeout
+                if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
+                incomingCallTimerRef.current = setTimeout(() => {
+                  stopRingtoneLoop();
+                  setIncomingCallData(null);
+                }, 30000);
               }
             }
 
@@ -320,6 +378,11 @@ export default function App() {
               if (acceptMatch && activeCallIdRef.current && acceptMatch[1] === activeCallIdRef.current) {
                 handledCallSignalsRef.current.add(signalKey);
                 stopRingtoneLoop();
+                setIsCallConnected(true);
+                if (callRingingTimerRef.current) {
+                  clearTimeout(callRingingTimerRef.current);
+                  callRingingTimerRef.current = null;
+                }
               }
             }
 
@@ -329,10 +392,15 @@ export default function App() {
               if (endMatch && activeCallIdRef.current && endMatch[1] === activeCallIdRef.current) {
                 handledCallSignalsRef.current.add(signalKey);
                 stopRingtoneLoop();
+                stopAudioStream();
+                webrtcService.close();
+                setIsCallConnected(false);
                 setIncomingCallData(null);
                 setIsVoiceCallVisible(false);
                 setIsVideoCallVisible(false);
                 activeCallIdRef.current = null;
+                if (callRingingTimerRef.current) clearTimeout(callRingingTimerRef.current);
+                if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
               }
             }
           }
@@ -384,6 +452,11 @@ export default function App() {
 
       const formatted = await Promise.all(
         chatOnlyMsgs.map(async m => {
+          const cacheKey = `${m.id}_${targetLang}_${selectedTone}`;
+          if (messageTranslationCache.has(cacheKey)) {
+            return messageTranslationCache.get(cacheKey);
+          }
+
           const cachedAudio = localAudioCache.get(m.id);
           const cachedImg = localImageCache.get(m.id);
           const isFriend = m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase();
@@ -439,7 +512,7 @@ export default function App() {
 
           // FOR PHOTO AND VOICE MESSAGES: NO AI TRANSLATION, NO PINYIN, NO CULTURAL NOTES!
           if (isVoiceMsg || isImageMsg) {
-            return {
+            const voiceOrImgMsg = {
               id: m.id,
               sender: isFriend ? 'friend' : 'user',
               senderName: m.senderName || m.senderEmail,
@@ -454,6 +527,8 @@ export default function App() {
               imageUri: imageDataUri,
               durationSecs: m.durationSecs || 3,
             };
+            if (m.id) messageTranslationCache.set(cacheKey, voiceOrImgMsg);
+            return voiceOrImgMsg;
           }
 
           let finalTranslation = rawTrans;
@@ -461,14 +536,16 @@ export default function App() {
           let finalNote = m.culturalNote;
 
           // Always translate using Google Gemini AI Engine to match chosen targetLang!
-          const aiRes = await translateWithGemini(rawOrig, 'auto', targetLang, selectedTone);
-          if (aiRes && aiRes.translatedText) {
-            finalTranslation = aiRes.translatedText;
-            finalPinyin = aiRes.pinyin;
-            finalNote = aiRes.culturalNote;
+          if (rawOrig) {
+            const aiRes = await translateWithGemini(rawOrig, 'auto', targetLang, selectedTone);
+            if (aiRes && aiRes.translatedText) {
+              finalTranslation = aiRes.translatedText;
+              finalPinyin = aiRes.pinyin;
+              finalNote = aiRes.culturalNote;
+            }
           }
 
-          return {
+          const parsedMsg = {
             id: m.id,
             sender: isFriend ? 'friend' : 'user',
             senderName: m.senderName || m.senderEmail,
@@ -483,16 +560,40 @@ export default function App() {
             imageUri: null,
             durationSecs: 3,
           };
+          if (m.id) messageTranslationCache.set(cacheKey, parsedMsg);
+          return parsedMsg;
         })
       );
 
-      setMessages(formatted);
+      // Deduplicate formatted messages by ID to guarantee unique React keys
+      const seenIds = new Set();
+      const uniqueFormatted = [];
+      for (const msg of formatted) {
+        const uniqueKey = msg.id || `${msg.timestamp}_${msg.originalText}`;
+        if (!seenIds.has(uniqueKey)) {
+          seenIds.add(uniqueKey);
+          uniqueFormatted.push(msg);
+        }
+      }
+
+      // Only update state if message IDs or statuses changed to prevent re-render thrashing
+      setMessages(prevMsgs => {
+        if (prevMsgs.length !== uniqueFormatted.length) {
+          return uniqueFormatted;
+        }
+        const hasDiff = uniqueFormatted.some((msg, idx) => {
+          const prev = prevMsgs[idx];
+          return !prev || prev.id !== msg.id || prev.status !== msg.status || prev.translatedText !== msg.translatedText;
+        });
+        return hasDiff ? uniqueFormatted : prevMsgs;
+      });
+
       // 💾 Persist to local device storage asynchronously for instant future loading
-      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, formatted);
+      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, uniqueFormatted);
     };
 
     loadMessages();
-    const pollInterval = setInterval(loadMessages, 1500);
+    const pollInterval = setInterval(loadMessages, 2500);
     return () => clearInterval(pollInterval);
   }, [currentUser, activeView, partnerEmail, targetLang, selectedTone]);
 
@@ -555,6 +656,7 @@ export default function App() {
   // Real Voice & Video Call Action Handlers (Instant UI response with async network dispatch)
   const handleStartVoiceCall = () => {
     setIsVoiceCallVisible(true);
+    setIsCallConnected(false);
     const recipient = partnerEmail || (currentUser.email === 'ken.sanio@test.com' ? 'ken.test2@test.com' : 'ken.sanio@test.com');
     initiateCall(
       currentUser.email,
@@ -566,10 +668,18 @@ export default function App() {
         activeCallIdRef.current = callSignal.callId;
       }
     }).catch(err => console.log('initiateCall voice error:', err));
+
+    // 30-second ringing timeout — auto cancel if unanswered
+    if (callRingingTimerRef.current) clearTimeout(callRingingTimerRef.current);
+    callRingingTimerRef.current = setTimeout(() => {
+      Alert.alert('Call Unanswered', 'Contact did not answer the call.');
+      handleCloseCall();
+    }, 30000);
   };
 
   const handleStartVideoCall = () => {
     setIsVideoCallVisible(true);
+    setIsCallConnected(false);
     const recipient = partnerEmail || (currentUser.email === 'ken.sanio@test.com' ? 'ken.test2@test.com' : 'ken.sanio@test.com');
     initiateCall(
       currentUser.email,
@@ -581,12 +691,24 @@ export default function App() {
         activeCallIdRef.current = callSignal.callId;
       }
     }).catch(err => console.log('initiateCall video error:', err));
+
+    // 30-second ringing timeout — auto cancel if unanswered
+    if (callRingingTimerRef.current) clearTimeout(callRingingTimerRef.current);
+    callRingingTimerRef.current = setTimeout(() => {
+      Alert.alert('Call Unanswered', 'Contact did not answer the call.');
+      handleCloseCall();
+    }, 30000);
   };
 
   const handleAcceptIncomingCall = () => {
+    if (incomingCallTimerRef.current) {
+      clearTimeout(incomingCallTimerRef.current);
+      incomingCallTimerRef.current = null;
+    }
     if (incomingCallData) {
       setPartnerEmail(incomingCallData.callerEmail);
       setActiveView('chatRoom');
+      setIsCallConnected(true);
       if (incomingCallData.callType === 'video') {
         setIsVideoCallVisible(true);
       } else {
@@ -605,6 +727,11 @@ export default function App() {
   };
 
   const handleDeclineIncomingCall = async () => {
+    if (incomingCallTimerRef.current) {
+      clearTimeout(incomingCallTimerRef.current);
+      incomingCallTimerRef.current = null;
+    }
+    stopRingtoneLoop();
     if (incomingCallData) {
       await declineCall(
         incomingCallData.callId,
@@ -617,6 +744,14 @@ export default function App() {
   };
 
   const handleCloseCall = async () => {
+    if (callRingingTimerRef.current) {
+      clearTimeout(callRingingTimerRef.current);
+      callRingingTimerRef.current = null;
+    }
+    if (incomingCallTimerRef.current) {
+      clearTimeout(incomingCallTimerRef.current);
+      incomingCallTimerRef.current = null;
+    }
     if (activeCallIdRef.current && partnerEmail) {
       await endCall(
         activeCallIdRef.current,
@@ -627,7 +762,9 @@ export default function App() {
       activeCallIdRef.current = null;
     }
     stopRingtoneLoop();
+    stopAudioStream();
     webrtcService.close();
+    setIsCallConnected(false);
     setIsVoiceCallVisible(false);
     setIsVideoCallVisible(false);
     setRemoteVideoFrameUri(null);
@@ -955,7 +1092,12 @@ export default function App() {
             ]
           }}
         >
-          {activeTab === 'settings' ? (
+          {isTestCallVisible ? (
+            <TestCallScreen
+              currentUser={currentUser}
+              onBack={() => setIsTestCallVisible(false)}
+            />
+          ) : activeTab === 'settings' ? (
           <SettingsScreen
             currentUser={currentUser}
             onUpdateUser={setCurrentUser}
@@ -1016,6 +1158,7 @@ export default function App() {
               onStartVideoCall={handleStartVideoCall}
               onOpenFriendProfile={() => setIsFriendProfileVisible(true)}
               onBackToChatList={handleBackToChatList}
+              onOpenTestCall={() => setIsTestCallVisible(true)}
               theme={activeTheme}
             />
 
@@ -1028,7 +1171,7 @@ export default function App() {
               <FlatList
                 ref={flatListRef}
                 data={messages}
-                keyExtractor={item => item.id}
+                keyExtractor={(item, index) => item.id ? `${item.id}_${index}` : `msg_${index}`}
                 contentContainerStyle={styles.messageList}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
@@ -1195,6 +1338,7 @@ export default function App() {
           userEmail={currentUser?.email}
           userName={currentUser?.displayName || currentUser?.email}
           partnerEmail={partnerEmail || 'ken.test2@test.com'}
+          isConnected={isCallConnected}
         />
 
         {/* Video Call Modal */}
@@ -1206,6 +1350,7 @@ export default function App() {
           userName={currentUser?.displayName || currentUser?.email}
           partnerEmail={partnerEmail || 'ken.test2@test.com'}
           remoteVideoFrameUri={remoteVideoFrameUri}
+          isConnected={isCallConnected}
         />
 
         {/* Vocabulary Modal */}

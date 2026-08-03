@@ -1,41 +1,77 @@
 /**
  * BridgeTalk AI - Cross-Platform Real-Time Audio Streaming Service
- * Dual Web (MediaRecorder) and Mobile (expo-av) audio streaming engine.
+ * Double-buffered recording engine for gapless audio streaming.
+ * Web: MediaRecorder API with continuous stream
+ * Mobile: expo-av with overlapping record/send pipeline
  */
 
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { sendRawSignal } from './translationService';
 
-const CHUNK_DURATION_MS = 400; // Low-latency 400ms audio chunks for faster voice delivery
+const CHUNK_DURATION_MS = 650; // Optimized 650ms chunk interval for fast, stable mobile I/O
 let isStreaming = false;
-let recordingRef = null;
-let streamTimerRef = null;
 let playbackQueue = [];
 let isPlaying = false;
+
+// Web-specific refs
 let webMediaStream = null;
 let webMediaRecorder = null;
 
+// Mobile-specific refs (double-buffer)
+let activeRecording = null;
+let pendingSendPromise = null;
+let mobileLoopTimer = null;
+
+let audioLevelListeners = new Set();
+let callLogListeners = new Set();
+
+export function onAudioLevel(callback) {
+  audioLevelListeners.add(callback);
+  return () => audioLevelListeners.delete(callback);
+}
+
+function notifyAudioLevel(level) {
+  audioLevelListeners.forEach(cb => {
+    try { cb(level); } catch (e) {}
+  });
+}
+
+export function onCallLog(callback) {
+  callLogListeners.add(callback);
+  return () => callLogListeners.delete(callback);
+}
+
+export function logCallEvent(msg) {
+  const time = new Date().toLocaleTimeString();
+  const formatted = `[${time}] ${msg}`;
+  console.log(`[CallLog] ${msg}`);
+  callLogListeners.forEach(cb => {
+    try { cb(formatted); } catch (e) {}
+  });
+}
+
 /**
- * Native recording options (iOS / Android)
+ * Native recording options (iOS / Android) - optimized for voice calls with metering
  */
 const RECORDING_OPTIONS = {
-  isMeteringEnabled: false,
+  isMeteringEnabled: true,
   android: {
     extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 16000,
+    outputFormat: Audio?.AndroidOutputFormat?.MPEG_4 || 2,
+    audioEncoder: Audio?.AndroidAudioEncoder?.AAC || 3,
+    sampleRate: 22050,
     numberOfChannels: 1,
-    bitRate: 32000,
+    bitRate: 64000,
   },
   ios: {
     extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.LOW,
-    sampleRate: 16000,
+    outputFormat: Audio?.IOSOutputFormat?.MPEG4AAC || 'mpeg',
+    audioQuality: Audio?.IOSAudioQuality?.MEDIUM || 64,
+    sampleRate: 22050,
     numberOfChannels: 1,
-    bitRate: 32000,
+    bitRate: 64000,
   },
 };
 
@@ -117,9 +153,10 @@ export async function startAudioStream(userEmail, userName, partnerEmail) {
   }
 }
 
-/**
- * WEB BROWSER MICROPHONE STREAMER (MediaRecorder API)
- */
+// ============================================================
+// WEB BROWSER MICROPHONE STREAMER (Continuous MediaRecorder)
+// ============================================================
+
 async function startWebAudioStream(userEmail, userName, partnerEmail) {
   try {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
@@ -128,68 +165,59 @@ async function startWebAudioStream(userEmail, userName, partnerEmail) {
       return;
     }
 
-    webMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    const sendWebChunk = () => {
-      if (!isStreaming || !webMediaStream) return;
-
-      let mimeType = 'audio/webm';
-      if (typeof MediaRecorder !== 'undefined') {
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          mimeType = 'audio/webm;codecs=opus';
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        }
+    webMediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 22050,
       }
+    });
 
-      webMediaRecorder = new MediaRecorder(webMediaStream, { mimeType });
-      const chunks = [];
+    let mimeType = 'audio/webm';
+    if (typeof MediaRecorder !== 'undefined') {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+    }
 
-      webMediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
+    // Use a SINGLE continuous MediaRecorder with timeslice for gapless chunks
+    webMediaRecorder = new MediaRecorder(webMediaStream, { mimeType });
 
-      webMediaRecorder.onstop = async () => {
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: mimeType });
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const dataUrl = reader.result || '';
-            const commaIdx = dataUrl.indexOf(',');
-            const base64Data = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : '';
-            if (base64Data && base64Data.length > 30) {
-              console.log(`[AudioStream Web] Sent 1s chunk (${base64Data.length} chars)`);
-              sendRawSignal(userEmail, userName, partnerEmail, `[AUDIO_CHUNK:${base64Data}]`);
-            }
-          };
-          reader.readAsDataURL(blob);
-        }
-
-        if (isStreaming) {
-          setTimeout(sendWebChunk, 50);
-        }
-      };
-
-      webMediaRecorder.start();
-      setTimeout(() => {
-        if (webMediaRecorder && webMediaRecorder.state === 'recording') {
-          webMediaRecorder.stop();
-        }
-      }, CHUNK_DURATION_MS);
+    webMediaRecorder.ondataavailable = (e) => {
+      if (!isStreaming) return;
+      if (e.data && e.data.size > 0) {
+        // Fire-and-forget: convert and send without blocking next chunk
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result || '';
+          const commaIdx = dataUrl.indexOf(',');
+          const base64Data = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : '';
+          if (base64Data && base64Data.length > 30) {
+            // Fire-and-forget send — don't await
+            sendRawSignal(userEmail, userName, partnerEmail, `[AUDIO_CHUNK:${base64Data}]`).catch(() => {});
+          }
+        };
+        reader.readAsDataURL(e.data);
+      }
     };
 
-    sendWebChunk();
+    // Start recording with timeslice — produces continuous ondataavailable events
+    // every CHUNK_DURATION_MS without gaps
+    webMediaRecorder.start(CHUNK_DURATION_MS);
+    console.log('[AudioStream Web] Continuous recording started with', CHUNK_DURATION_MS, 'ms timeslice');
   } catch (err) {
     console.log('Web microphone stream error:', err);
     isStreaming = false;
   }
 }
 
-/**
- * NATIVE MOBILE MICROPHONE STREAMER (expo-av)
- */
+// ============================================================
+// NATIVE MOBILE MICROPHONE STREAMER (Double-Buffered expo-av)
+// ============================================================
+
 async function startMobileAudioStream(userEmail, userName, partnerEmail) {
   try {
     const permission = await Audio.requestPermissionsAsync();
@@ -203,10 +231,11 @@ async function startMobileAudioStream(userEmail, userName, partnerEmail) {
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
       staysActiveInBackground: true,
-      shouldDuckAndroid: true,
+      shouldDuckAndroid: false,
       playThroughEarpieceAndroid: false,
     });
 
+    // Start the double-buffered recording loop
     recordMobileLoop(userEmail, userName, partnerEmail);
   } catch (err) {
     console.log('Mobile startAudioStream error:', err);
@@ -214,65 +243,103 @@ async function startMobileAudioStream(userEmail, userName, partnerEmail) {
   }
 }
 
+/**
+ * Double-buffered recording loop:
+ * 1. Start recording chunk N
+ * 2. After CHUNK_DURATION_MS, stop chunk N and IMMEDIATELY start chunk N+1
+ * 3. Send chunk N data in the background (fire-and-forget)
+ * 4. No gap between chunks because the next recording starts before the send completes
+ */
 async function recordMobileLoop(userEmail, userName, partnerEmail) {
   if (!isStreaming) return;
 
   try {
+    // Create and start a new recording
     const recording = new Audio.Recording();
     await recording.prepareToRecordAsync(RECORDING_OPTIONS);
     await recording.startAsync();
-    recordingRef = recording;
+    activeRecording = recording;
 
-    streamTimerRef = setTimeout(async () => {
+    // Continuously sample microphone metering status every 100ms during recording
+    const meterInterval = setInterval(async () => {
+      if (activeRecording === recording) {
+        try {
+          const status = await recording.getStatusAsync();
+          if (status && status.isRecording && typeof status.metering === 'number') {
+            const db = status.metering;
+            // Background noise is typically below -55dB. Speech is -50dB to 0dB.
+            if (db > -55) {
+              const normLevel = Math.min(1.0, Math.max(0.15, (db + 55) / 45));
+              notifyAudioLevel(normLevel);
+            } else {
+              notifyAudioLevel(0);
+            }
+          }
+        } catch (e) {}
+      }
+    }, 100);
+
+    mobileLoopTimer = setTimeout(async () => {
+      clearInterval(meterInterval);
       if (!isStreaming) return;
 
       try {
+        // Stop current recording
         await recording.stopAndUnloadAsync();
         const uri = recording.getURI();
-        recordingRef = null;
+        activeRecording = null;
 
+        // IMMEDIATELY start next recording before processing the current one
+        if (isStreaming) {
+          recordMobileLoop(userEmail, userName, partnerEmail);
+        }
+
+        // Now process and send the completed chunk in background (fire-and-forget)
         if (uri) {
-          const base64Data = await uriToBase64(uri);
-          if (base64Data && base64Data.length > 30) {
-            console.log(`[AudioStream Mobile] Sent chunk (${base64Data.length} chars)`);
-            await sendRawSignal(
+          const rawBase64 = await uriToBase64(uri);
+          const cleanBase64 = rawBase64 ? rawBase64.replace(/[\r\n\s]/g, '') : '';
+          if (cleanBase64 && cleanBase64.length > 30) {
+            // Don't await — fire and forget
+            sendRawSignal(
               userEmail,
               userName,
               partnerEmail,
-              `[AUDIO_CHUNK:${base64Data}]`
-            );
+              `[AUDIO_CHUNK:${cleanBase64}]`
+            ).catch(() => {});
           }
         }
       } catch (err) {
-        console.log('Mobile chunk send error:', err);
-      }
-
-      if (isStreaming) {
-        recordMobileLoop(userEmail, userName, partnerEmail);
+        console.log('Mobile chunk cycle error:', err);
+        if (isStreaming) {
+          setTimeout(() => recordMobileLoop(userEmail, userName, partnerEmail), 100);
+        }
       }
     }, CHUNK_DURATION_MS);
   } catch (err) {
-    console.log('Mobile recording loop error:', err);
+    console.log('Mobile recording init error:', err);
     if (isStreaming) {
-      streamTimerRef = setTimeout(() => {
+      mobileLoopTimer = setTimeout(() => {
         recordMobileLoop(userEmail, userName, partnerEmail);
-      }, 500);
+      }, 200);
     }
   }
 }
 
-/**
- * Stop audio streaming on Web and Mobile
- */
+// ============================================================
+// STOP & CLEANUP
+// ============================================================
+
 export async function stopAudioStream() {
   isStreaming = false;
   console.log('[AudioStream] Stopped');
 
-  if (streamTimerRef) {
-    clearTimeout(streamTimerRef);
-    streamTimerRef = null;
+  // Clear mobile timer
+  if (mobileLoopTimer) {
+    clearTimeout(mobileLoopTimer);
+    mobileLoopTimer = null;
   }
 
+  // Stop web MediaRecorder (single continuous instance)
   if (webMediaRecorder && webMediaRecorder.state !== 'inactive') {
     try {
       webMediaRecorder.stop();
@@ -280,6 +347,7 @@ export async function stopAudioStream() {
     webMediaRecorder = null;
   }
 
+  // Release web media stream tracks
   if (webMediaStream) {
     try {
       webMediaStream.getTracks().forEach(track => track.stop());
@@ -287,28 +355,34 @@ export async function stopAudioStream() {
     webMediaStream = null;
   }
 
-  if (recordingRef) {
+  // Stop active mobile recording
+  if (activeRecording) {
     try {
-      await recordingRef.stopAndUnloadAsync();
+      await activeRecording.stopAndUnloadAsync();
     } catch (e) {}
-    recordingRef = null;
+    activeRecording = null;
   }
 
   playbackQueue = [];
   isPlaying = false;
 }
 
+// ============================================================
+// PLAYBACK ENGINE (Received Audio Chunks)
+// ============================================================
+
 /**
  * Queue and play received audio chunk
  */
 export async function playAudioChunk(base64Data) {
   if (!base64Data) return;
+  logCallEvent(`📥 Received audio chunk packet (${base64Data.length} base64 chars)`);
   playbackQueue.push(base64Data);
   processPlaybackQueue();
 }
 
 /**
- * Sequential playback processor for Web and Mobile
+ * Sequential playback processor — plays chunks back-to-back without overlap
  */
 async function processPlaybackQueue() {
   if (isPlaying || playbackQueue.length === 0) return;
@@ -318,65 +392,104 @@ async function processPlaybackQueue() {
     const chunk = playbackQueue.shift();
     try {
       if (Platform.OS === 'web') {
-        const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/wav'];
-        let played = false;
-
-        for (const mime of mimeTypes) {
-          if (played) break;
-          try {
-            const blob = base64ToBlob(chunk, mime);
-            if (!blob) continue;
-            const blobUrl = URL.createObjectURL(blob);
-            const audio = new window.Audio(blobUrl);
-
-            await audio.play();
-            played = true;
-
-            await new Promise((resolve) => {
-              audio.onended = () => {
-                URL.revokeObjectURL(blobUrl);
-                resolve();
-              };
-              audio.onerror = () => {
-                URL.revokeObjectURL(blobUrl);
-                resolve();
-              };
-              setTimeout(() => {
-                URL.revokeObjectURL(blobUrl);
-                resolve();
-              }, 1500);
-            });
-          } catch (e) {
-            // Try next MIME
-          }
-        }
+        await playWebChunk(chunk);
       } else {
-        const dataUrl = `data:audio/mp4;base64,${chunk}`;
-        try {
-          const { sound } = await Audio.Sound.createAsync(
-            { uri: dataUrl },
-            { shouldPlay: true, volume: 1.0 }
-          );
-          await sound.playAsync();
-
-          await new Promise((resolve) => {
-            sound.setOnPlaybackStatusUpdate((status) => {
-              if (status.didJustFinish) resolve();
-            });
-            setTimeout(resolve, 1500);
-          });
-
-          await sound.unloadAsync();
-        } catch (e) {
-          console.log('Native audio chunk playback error:', e);
-        }
+        await playMobileChunk(chunk);
       }
     } catch (err) {
-      console.log('Audio chunk playback error:', err);
+      logCallEvent(`❌ Audio chunk playback exception: ${err.message}`);
     }
   }
 
   isPlaying = false;
+}
+
+async function playWebChunk(chunk) {
+  const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/wav'];
+
+  for (const mime of mimeTypes) {
+    try {
+      const blob = base64ToBlob(chunk, mime);
+      if (!blob) continue;
+      const blobUrl = URL.createObjectURL(blob);
+      const audio = new window.Audio(blobUrl);
+
+      await audio.play();
+
+      await new Promise((resolve) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(blobUrl);
+          resolve();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(blobUrl);
+          resolve();
+        };
+        // Safety timeout
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+          resolve();
+        }, 1000);
+      });
+      return; // Success — exit mime loop
+    } catch (e) {
+      // Try next MIME type
+    }
+  }
+}
+
+async function playMobileChunk(chunk) {
+  if (!chunk || chunk.length < 30) return;
+
+  // If queue has backed up, keep only the latest audio chunk to avoid native thread lag
+  if (playbackQueue.length > 1) {
+    playbackQueue = playbackQueue.slice(-1);
+  }
+
+  let tempFileUri = null;
+  try {
+    tempFileUri = `${FileSystem.cacheDirectory}audio_chunk_${Date.now()}.m4a`;
+    logCallEvent(`💾 Writing temp audio file (${chunk.length} bytes) to disk...`);
+    await FileSystem.writeAsStringAsync(tempFileUri, chunk, {
+      encoding: 'base64',
+    });
+
+    logCallEvent('🔊 Configuring Audio Mode for Playback...');
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+      overrideOutputAudioPortIOS: Audio.OVERRIDE_SPEAKER_SPEAKER,
+    });
+
+    logCallEvent('▶️ Loading Audio.Sound.createAsync...');
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: tempFileUri },
+      { shouldPlay: true, volume: 1.0 }
+    );
+
+    logCallEvent('✅ Audio sound playing! Waiting for finish...');
+    await new Promise((resolve) => {
+      let timeout = setTimeout(resolve, 750);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.didJustFinish) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+
+    sound.unloadAsync().catch(() => {});
+    logCallEvent('🎉 Audio chunk playback completed cleanly!');
+  } catch (e) {
+    logCallEvent(`❌ playMobileChunk Error: ${e.message || e}`);
+  } finally {
+    if (tempFileUri) {
+      FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => {});
+    }
+  }
 }
 
 export function isAudioStreaming() {

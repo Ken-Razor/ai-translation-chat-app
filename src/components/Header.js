@@ -14,6 +14,7 @@ export default function Header({
   onStartVideoCall,
   onOpenFriendProfile,
   onBackToChatList,
+  onOpenTestCall,
   theme = DARK_THEME
 }) {
   const displayTitle = partnerUser?.displayName || (partnerName.includes('@') ? partnerName.split('@')[0] : partnerName);
@@ -65,7 +66,7 @@ export default function Header({
         </TouchableOpacity>
       </View>
 
-      {/* Right Section: Language Pill + Call Icons Only */}
+      {/* Right Section: Language Pill + Call Icons + Diagnostic Test Icon */}
       <View style={styles.rightSection}>
         {/* Target Language Selector Pill */}
         <TouchableOpacity style={styles.langPill} onPress={onOpenLangPicker}>
@@ -82,6 +83,13 @@ export default function Header({
         <TouchableOpacity style={styles.iconBtn} onPress={onStartVideoCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <FontAwesome name="video-camera" size={18} color="#38BDF8" />
         </TouchableOpacity>
+
+        {/* Call Hardware Diagnostics Tool Button */}
+        {onOpenTestCall && (
+          <TouchableOpacity style={styles.iconBtn} onPress={onOpenTestCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <FontAwesome name="flask" size={18} color="#F59E0B" />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

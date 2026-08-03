@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, Image, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -6,6 +6,59 @@ import { Audio } from 'expo-av';
 import { startAudioStream, stopAudioStream, unlockAudioContext } from '../services/audioStreamService';
 import { sendRawSignal } from '../services/translationService';
 import { webrtcService } from '../services/webrtcService';
+import { trtcService } from '../services/trtcService';
+
+/**
+ * Isolated Camera PIP component — memoized to prevent re-renders from timer state changes.
+ * This is the key fix for the shutter sound and 1fps issue:
+ * Without memo, every callDuration state update (every 1s) re-renders the entire modal,
+ * which destroys and recreates the CameraView, causing the iOS shutter sound and frame drops.
+ */
+const CameraPIP = memo(function CameraPIP({ facing, permission }) {
+  const cameraRef = useRef(null);
+
+  if (!permission || !permission.granted) {
+    return (
+      <View style={styles.pipFallback}>
+        <FontAwesome name="user" size={24} color="#38BDF8" />
+      </View>
+    );
+  }
+
+  return (
+    <CameraView
+      ref={cameraRef}
+      style={styles.pipCamera}
+      facing={facing}
+    />
+  );
+});
+
+/**
+ * Isolated call timer display — updates every second without triggering parent re-render
+ */
+function CallTimer({ visible }) {
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setDuration(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setDuration(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [visible]);
+
+  const mins = Math.floor(duration / 60);
+  const secs = duration % 60;
+  const formatted = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+  return (
+    <Text style={styles.callStatus}>TRTC HD Video • {formatted}</Text>
+  );
+}
 
 export default function VideoCallModal({
   visible,
@@ -15,21 +68,28 @@ export default function VideoCallModal({
   userName,
   partnerEmail,
   remoteVideoFrameUri = null,
+  isConnected: externalConnected,
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState('front');
-  const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [liveSubtitles, setLiveSubtitles] = useState('AI Live Subtitles Active • Speak naturally');
-  const cameraRef = useRef(null);
 
+  // Sync external connection state if passed
+  useEffect(() => {
+    if (externalConnected) {
+      setIsConnected(true);
+    }
+  }, [externalConnected]);
+
+  // Audio & WebRTC lifecycle — no timer state here to avoid camera re-renders
   useEffect(() => {
     if (!visible) {
-      setCallDuration(0);
       setIsConnected(false);
       stopAudioStream();
       webrtcService.close();
+      trtcService.exitRoom();
       return;
     }
 
@@ -40,7 +100,7 @@ export default function VideoCallModal({
     // Unlock browser / native audio policy
     unlockAudioContext();
 
-    // Configure audio mode for high volume playback & recording
+    // Configure audio mode for simultaneous recording & playback
     Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
@@ -48,14 +108,14 @@ export default function VideoCallModal({
       shouldDuckAndroid: false,
     }).catch(err => console.log('Audio mode error:', err));
 
-    const timer = setInterval(() => {
-      setCallDuration(prev => prev + 1);
-    }, 1000);
-
-    // Start HTTP audio chunk streaming (reliable, works everywhere)
-    if (userEmail && partnerEmail) {
-      startAudioStream(userEmail, userName || userEmail, partnerEmail);
-      setIsConnected(true);
+    // Initialize Tencent TRTC Video Room (SDKAppID: 20045905)
+    if (userEmail) {
+      const roomNum = (userEmail + partnerEmail).split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 1000);
+      trtcService.enterRoom({
+        roomId: roomNum,
+        userId: userEmail,
+        isVideo: true,
+      }).catch(err => console.log('[VideoCall] TRTC room enter error:', err));
     }
 
     // Also attempt WebRTC P2P upgrade for video + instant audio
@@ -68,34 +128,48 @@ export default function VideoCallModal({
           webrtcService.createOffer(userEmail, partnerEmail);
         }
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      console.log('[VideoCall] WebRTC not available, using HTTP streaming:', err.message);
+    });
 
     return () => {
-      clearInterval(timer);
       stopAudioStream();
       webrtcService.close();
+      trtcService.exitRoom();
     };
-  }, [visible, permission, userEmail, userName, partnerEmail]);
+  }, [visible, userEmail, userName, partnerEmail]);
 
+  // Handle permission changes separately to avoid re-triggering audio setup
   useEffect(() => {
-    if (isMuted) {
-      stopAudioStream();
-    } else if (visible && isConnected && userEmail && partnerEmail) {
-      startAudioStream(userEmail, userName || userEmail, partnerEmail);
+    if (visible && !permission?.granted) {
+      requestPermission();
     }
-  }, [isMuted]);
+  }, [permission]);
+
+  // Audio Stream lifecycle — ONLY start streaming when call is CONNECTED and NOT muted
+  useEffect(() => {
+    if (visible && isConnected && userEmail && partnerEmail && !isMuted) {
+      startAudioStream(userEmail, userName || userEmail, partnerEmail);
+    } else {
+      stopAudioStream();
+    }
+  }, [visible, isConnected, isMuted, userEmail, userName, partnerEmail]);
 
   if (!visible) return null;
 
-  const toggleCameraFacing = () => {
+  const toggleCameraFacing = useCallback(() => {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
-  };
+  }, []);
 
-  const formatCallTime = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins < 10 ? '0' : ''}${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
-  };
+  const handleEndCall = useCallback(() => {
+    webrtcService.close();
+    stopAudioStream();
+    onClose();
+  }, [onClose]);
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted(prev => !prev);
+  }, []);
 
   const peerInitial = partnerName ? partnerName.charAt(0).toUpperCase() : 'P';
 
@@ -127,23 +201,13 @@ export default function VideoCallModal({
           <View style={styles.topBar}>
             <View style={styles.peerCard}>
               <Text style={styles.peerName}>{partnerName || 'Peer Contact'}</Text>
-              <Text style={styles.callStatus}>HD Video Call • {formatCallTime(callDuration)}</Text>
+              <CallTimer visible={visible} />
             </View>
           </View>
 
-          {/* PIP INSET WINDOW: LOCAL SELF CAMERA FEED */}
+          {/* PIP INSET WINDOW: LOCAL SELF CAMERA FEED — memoized to prevent re-renders */}
           <View style={styles.pipContainer}>
-            {permission && permission.granted ? (
-              <CameraView
-                ref={cameraRef}
-                style={styles.pipCamera}
-                facing={facing}
-              />
-            ) : (
-              <View style={styles.pipFallback}>
-                <FontAwesome name="user" size={24} color="#38BDF8" />
-              </View>
-            )}
+            <CameraPIP facing={facing} permission={permission} />
             <View style={styles.pipBadge}>
               <Text style={styles.pipBadgeText}>You</Text>
             </View>
@@ -163,7 +227,7 @@ export default function VideoCallModal({
             {/* Mute Button */}
             <TouchableOpacity
               style={[styles.controlBtn, isMuted && styles.activeControlBtn]}
-              onPress={() => setIsMuted(prev => !prev)}
+              onPress={handleToggleMute}
             >
               <FontAwesome
                 name={isMuted ? "microphone-slash" : "microphone"}
@@ -175,11 +239,7 @@ export default function VideoCallModal({
             {/* End Call Button */}
             <TouchableOpacity
               style={styles.endCallBtn}
-              onPress={() => {
-                webrtcService.close();
-                stopAudioStream();
-                onClose();
-              }}
+              onPress={handleEndCall}
             >
               <FontAwesome name="phone" size={24} color="#FFFFFF" style={{ transform: [{ rotate: '135deg' }] }} />
             </TouchableOpacity>

@@ -1,6 +1,7 @@
 /**
  * ViveTalk WebRTC Pure Direct UDP Voice & Video Stream Engine
  * Instant sub-50ms latency Opus 48kHz P2P Audio & Video without HTTP file polling.
+ * Includes TURN fallback servers for NAT/firewall traversal.
  */
 
 import { Platform } from 'react-native';
@@ -23,17 +24,33 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
     RTCView = webrtc.RTCView;
     mediaDevices = webrtc.mediaDevices;
   } catch (e) {
-    console.warn('Native WebRTC module fallback:', e.message);
+    console.warn('[WebRTC] Native module not available (expected in Expo Go):', e.message);
   }
 }
 
-const STUN_SERVERS = {
+// ICE servers with Tencent TRTC Global Cloud STUN & TURN relay fallback
+const ICE_SERVERS = {
   iceServers: [
+    { urls: 'stun:trtc-stun.tencentcloud.com:19302' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
+    // Free TURN servers from Open Relay Project (for NAT traversal)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
 };
 
@@ -46,6 +63,23 @@ class WebRTCService {
     this.pendingOffer = null;       // Buffered SDP offer for callee
     this.pendingOfferMeta = null;   // { myEmail, partnerEmail }
     this.isCalleeMode = false;      // True if we received an offer before modal opened
+    this.connectionState = 'idle';  // idle | connecting | connected | failed
+    this.onStateChangeCallback = null;
+  }
+
+  /**
+   * Set a callback to monitor connection state changes
+   */
+  onStateChange(callback) {
+    this.onStateChangeCallback = callback;
+  }
+
+  _updateState(newState) {
+    this.connectionState = newState;
+    console.log(`[WebRTC] Connection state: ${newState}`);
+    if (this.onStateChangeCallback) {
+      this.onStateChangeCallback(newState);
+    }
   }
 
   /**
@@ -84,10 +118,15 @@ class WebRTCService {
         this.localStream = await window.navigator.mediaDevices.getUserMedia(constraints);
       }
 
+      console.log('[WebRTC] Local media acquired:', {
+        audioTracks: this.localStream?.getAudioTracks()?.length || 0,
+        videoTracks: this.localStream?.getVideoTracks()?.length || 0,
+      });
+
       return this.localStream;
     } catch (err) {
-      console.warn('⚠️ [WebRTC] Media Device error:', err);
-      return null;
+      console.warn('⚠️ [WebRTC] Media Device error:', err.message || err);
+      throw err; // Let caller handle the error instead of swallowing
     }
   }
 
@@ -96,7 +135,8 @@ class WebRTCService {
    */
   initPeerConnection(myEmail, partnerEmail, onRemoteStream) {
     if (!RTCPeerConnection) {
-      console.warn('⚠️ WebRTC PeerConnection not supported in this runtime environment');
+      console.warn('⚠️ [WebRTC] PeerConnection not available in this runtime');
+      this._updateState('failed');
       return null;
     }
 
@@ -106,7 +146,8 @@ class WebRTCService {
       return this.peerConnection;
     }
 
-    this.peerConnection = new RTCPeerConnection(STUN_SERVERS);
+    this._updateState('connecting');
+    this.peerConnection = new RTCPeerConnection(ICE_SERVERS);
     this.onRemoteStreamCallback = onRemoteStream;
 
     // Attach local hardware media tracks directly
@@ -114,20 +155,42 @@ class WebRTCService {
       this.localStream.getTracks().forEach((track) => {
         try {
           this.peerConnection.addTrack(track, this.localStream);
-        } catch (e) {}
+          console.log(`[WebRTC] Added local ${track.kind} track`);
+        } catch (e) {
+          console.warn(`[WebRTC] Failed to add ${track.kind} track:`, e.message);
+        }
       });
     }
 
-    // ICE Candidate Handler
+    // ICE Candidate Handler — batch small candidates for efficiency
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate && partnerEmail) {
         const candidateStr = JSON.stringify(event.candidate);
-        sendRawSignal(myEmail, myEmail, partnerEmail, `📡 [WEBRTC_ICE:${candidateStr}]`).catch(() => {});
+        sendRawSignal(myEmail, myEmail, partnerEmail, `📡 [WEBRTC_ICE:${candidateStr}]`).catch((err) => {
+          console.warn('[WebRTC] Failed to send ICE candidate:', err.message);
+        });
       }
+    };
+
+    // Connection state monitoring
+    this.peerConnection.onconnectionstatechange = () => {
+      const state = this.peerConnection?.connectionState;
+      console.log(`[WebRTC] Connection state changed: ${state}`);
+      if (state === 'connected') {
+        this._updateState('connected');
+      } else if (state === 'failed' || state === 'disconnected') {
+        this._updateState('failed');
+      }
+    };
+
+    this.peerConnection.oniceconnectionstatechange = () => {
+      const state = this.peerConnection?.iceConnectionState;
+      console.log(`[WebRTC] ICE connection state: ${state}`);
     };
 
     // On Remote Track Received (Instant UDP Stream Playback)
     this.peerConnection.ontrack = (event) => {
+      console.log(`[WebRTC] Remote track received: ${event.track?.kind}`);
       if (event.streams && event.streams[0]) {
         this.remoteStream = event.streams[0];
 
@@ -143,7 +206,7 @@ class WebRTCService {
             document.body.appendChild(audioEl);
           }
           audioEl.srcObject = this.remoteStream;
-          audioEl.play().catch(err => console.log('WebRTC audio autoplay:', err));
+          audioEl.play().catch(err => console.log('[WebRTC] Audio autoplay blocked:', err.message));
         }
 
         if (this.onRemoteStreamCallback) {
@@ -169,9 +232,10 @@ class WebRTCService {
       await this.peerConnection.setLocalDescription(offer);
       const sdpStr = JSON.stringify(offer);
       await sendRawSignal(myEmail, myEmail, partnerEmail, `📡 [WEBRTC_OFFER:${sdpStr}]`);
+      console.log('[WebRTC] Offer sent successfully');
       return offer;
     } catch (err) {
-      console.warn('⚠️ [WebRTC] Create Offer error:', err);
+      console.warn('⚠️ [WebRTC] Create Offer error:', err.message || err);
       return null;
     }
   }
@@ -202,7 +266,7 @@ class WebRTCService {
       console.log('[WebRTC] Processed offer and sent answer');
       return answer;
     } catch (err) {
-      console.warn('⚠️ [WebRTC] Handle Offer error:', err);
+      console.warn('⚠️ [WebRTC] Handle Offer error:', err.message || err);
       return null;
     }
   }
@@ -232,7 +296,7 @@ class WebRTCService {
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
       console.log('[WebRTC] Received answer, connection establishing...');
     } catch (err) {
-      console.warn('⚠️ [WebRTC] Handle Answer error:', err);
+      console.warn('⚠️ [WebRTC] Handle Answer error:', err.message || err);
     }
   }
 
@@ -245,7 +309,7 @@ class WebRTCService {
       const candidateObj = JSON.parse(candidateStr);
       await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidateObj));
     } catch (err) {
-      console.warn('⚠️ [WebRTC] Add ICE error:', err);
+      console.warn('⚠️ [WebRTC] Add ICE error:', err.message || err);
     }
   }
 
@@ -253,6 +317,8 @@ class WebRTCService {
    * Close & Tear Down Connection & Hardware Tracks
    */
   close() {
+    console.log('[WebRTC] Closing connection and releasing resources');
+
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const audioEl = document.getElementById('webrtc-remote-audio');
       if (audioEl) {
@@ -303,9 +369,11 @@ class WebRTCService {
     }
 
     this.onRemoteStreamCallback = null;
+    this.onStateChangeCallback = null;
     this.pendingOffer = null;
     this.pendingOfferMeta = null;
     this.isCalleeMode = false;
+    this._updateState('idle');
   }
 }
 
