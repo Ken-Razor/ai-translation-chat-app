@@ -1,533 +1,281 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
   View,
-  TouchableOpacity,
   FlatList,
+  TouchableOpacity,
   TextInput,
-  StatusBar,
+  Image,
   Modal,
   ActivityIndicator,
-  Alert,
-  Image
+  RefreshControl,
+  Platform,
 } from 'react-native';
-import {
-  fetchUserList,
-  fetchPeerMessages,
-  searchUsers,
-  sendFriendRequest,
-  acceptFriendRequest,
-  declineFriendRequest,
-  fetchFriendRequests
-} from '../services/translationService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FontAwesome } from '@expo/vector-icons';
+import { authService } from '../services/authService';
+import { storageService } from '../services/storageService';
+import { fetchUserList, fetchPeerMessages } from '../services/translationService';
 
-const AVATAR_COLORS = ['#EC4899', '#8B5CF6', '#3B82F6', '#F97316', '#10B981', '#6366F1'];
+const LANGUAGE_META = [
+  { id: 'zh', name: 'Chinese', flag: '🇨🇳', aliases: ['zh', 'chinese', 'mandarin', 'zhongwen', '中文', 'cmn'] },
+  { id: 'id', name: 'Indonesian', flag: '🇮🇩', aliases: ['id', 'indonesian', 'indonesia', 'bahasa', 'bahasaindonesia'] },
+  { id: 'en', name: 'English', flag: '🇺🇸', aliases: ['en', 'english', 'eng', 'us', 'uk'] },
+  { id: 'ja', name: 'Japanese', flag: '🇯🇵', aliases: ['ja', 'jp', 'japanese', 'nihongo', '日本語'] },
+  { id: 'ko', name: 'Korean', flag: '🇰🇷', aliases: ['ko', 'korean', 'hangul', '한국어'] },
+  { id: 'es', name: 'Spanish', flag: '🇪🇸', aliases: ['es', 'spanish', 'espanol', 'español'] },
+  { id: 'fr', name: 'French', flag: '🇫🇷', aliases: ['fr', 'french', 'francais', 'français'] },
+  { id: 'de', name: 'German', flag: '🇩🇪', aliases: ['de', 'german', 'deutsch'] },
+  { id: 'ar', name: 'Arabic', flag: '🇸🇦', aliases: ['ar', 'arabic', 'alarabiya', 'العربية'] },
+  { id: 'it', name: 'Italian', flag: '🇮🇹', aliases: ['it', 'italian', 'italiano'] },
+  { id: 'pt', name: 'Portuguese', flag: '🇵🇹', aliases: ['pt', 'portuguese', 'portugues', 'português'] },
+  { id: 'ru', name: 'Russian', flag: '🇷🇺', aliases: ['ru', 'russian', 'russkiy', 'русский'] },
+];
+
+const getFlagForLang = (raw) => {
+  if (!raw) return '🌐';
+  const clean = String(raw).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff]/gi, ' ').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+
+  for (const item of LANGUAGE_META) {
+    if (item.aliases.includes(clean)) return item.flag;
+    for (const w of words) {
+      if (item.aliases.includes(w)) return item.flag;
+    }
+  }
+
+  for (const item of LANGUAGE_META) {
+    for (const w of words) {
+      if (w.length >= 3 && (item.name.toLowerCase().startsWith(w) || w.startsWith(item.name.toLowerCase()))) {
+        return item.flag;
+      }
+    }
+  }
+
+  return '🌐';
+};
 
 export default function ChatListScreen({
-  activeTab: controlledTab = 'chats',
-  onSelectTab,
   currentUser,
   onSelectChat,
   onOpenProfile,
+  onOpenVocab,
   theme,
   themePreference,
   onToggleTheme
 }) {
-  const [internalTab, setInternalTab] = useState(controlledTab);
-
-  useEffect(() => {
-    if (controlledTab && (controlledTab === 'chats' || controlledTab === 'contacts')) {
-      setInternalTab(controlledTab);
-    }
-  }, [controlledTab]);
-
-  const activeTab = controlledTab || internalTab;
-
-  const handleTabChange = (tab) => {
-    setInternalTab(tab);
-    if (onSelectTab) onSelectTab(tab);
-  };
-
-  const [userList, setUserList] = useState([]);
-  const [chatPreviews, setChatPreviews] = useState({});
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isTranslationOn, setIsTranslationOn] = useState(true);
+  const [chatList, setChatList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Friend Request States
-  // Live profile state synced with backend database
-  const [myProfile, setMyProfile] = useState(currentUser);
-  const [receivedRequests, setReceivedRequests] = useState([]);
-  const [sentRequests, setSentRequests] = useState([]);
-  const [localAddedFriends, setLocalAddedFriends] = useState([]);
+  const myEmail = (currentUser?.email || '').toLowerCase();
 
-  // Search & Add Friend Modal States
-  const [showAddFriendModal, setShowAddFriendModal] = useState(false);
-  const [friendSearchInput, setFriendSearchInput] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [addingFriendEmail, setAddingFriendEmail] = useState('');
-  const [modalFeedback, setModalFeedback] = useState('');
-
-  const displayUser = myProfile || currentUser;
-  const userInitial = displayUser?.displayName ? displayUser.displayName.charAt(0).toUpperCase() : 'J';
-
-  const loadChats = async () => {
-    if (!currentUser) return;
-
-    // Fetch user list & active previews
-    const users = await fetchUserList();
-    
-    // Sync current user's profile live from backend (updates friends list automatically)
-    const me = users.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
-    if (me) {
-      setMyProfile(me);
-    }
-
-    const filtered = users.filter(u => u.email.toLowerCase() !== currentUser.email.toLowerCase());
-    setUserList(filtered);
-
-    const previews = {};
-    for (const u of filtered) {
-      const msgs = await fetchPeerMessages(currentUser.email, u.email);
-      if (msgs && msgs.length > 0) {
-        previews[u.email] = msgs[msgs.length - 1];
+  // 1. Instant 0ms Load from Local Storage Cache on Mount
+  useEffect(() => {
+    if (!myEmail) return;
+    storageService.getLocalChatList(myEmail).then(cached => {
+      if (Array.isArray(cached) && cached.length > 0) {
+        setChatList(cached);
+        setLoading(false);
       }
+    });
+  }, [myEmail]);
+
+  // Load real registered users from backend and fetch recent conversation snippet
+  const loadConversations = useCallback(async () => {
+    try {
+      const serverUsers = await fetchUserList();
+      if (Array.isArray(serverUsers)) {
+        // Exclude currently logged in user
+        const otherUsers = serverUsers.filter(u => u.email && u.email.toLowerCase() !== myEmail);
+
+        const formattedList = await Promise.all(
+          otherUsers.map(async (u) => {
+            const peerEmail = u.email.toLowerCase();
+            let lastMsgText = u.bio || 'Tap to start conversation';
+            let timestamp = 'Active now';
+            let unread = 0;
+
+            try {
+              const msgs = await fetchPeerMessages(myEmail, peerEmail);
+              if (Array.isArray(msgs) && msgs.length > 0) {
+                // Filter out call signal messages
+                const normalMsgs = msgs.filter(m => {
+                  const orig = m.originalText || m.text || '';
+                  return !orig.includes('[CALL_') && !orig.includes('[AUDIO_CHUNK:') && !orig.includes('[VIDEO_FRAME:');
+                });
+
+                if (normalMsgs.length > 0) {
+                  const lastMsg = normalMsgs[normalMsgs.length - 1];
+                  lastMsgText = lastMsg.originalText || lastMsg.text || 'Photo / Voice Note';
+                  if (lastMsg.timestamp) {
+                    const d = new Date(lastMsg.timestamp);
+                    timestamp = isNaN(d.getTime())
+                      ? 'Recently'
+                      : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  }
+                }
+              }
+            } catch (msgErr) {}
+
+            const nativeFlag = getFlagForLang(u.nativeLanguage);
+            const targetFlag = getFlagForLang(u.learningLanguage);
+
+            return {
+              id: u.id || u.email,
+              email: u.email,
+              displayName: u.displayName || u.username || u.email.split('@')[0],
+              username: u.username ? (u.username.startsWith('@') ? u.username : `@${u.username}`) : '',
+              lastMessage: lastMsgText,
+              timestamp: timestamp,
+              unread: unread,
+              nativeLang: u.nativeLanguage || 'English',
+              learningLang: u.learningLanguage || 'Japanese',
+              nativeFlag: nativeFlag,
+              avatar: (u.avatar && u.avatar.startsWith('http'))
+                ? u.avatar
+                : (u.photoURL && u.photoURL.startsWith('http'))
+                ? u.photoURL
+                : `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || u.email)}&background=4B1A56&color=ffffff&size=256`,
+              online: true,
+            };
+          })
+        );
+
+        setChatList(formattedList);
+        // Persist locally for instant future loads
+        if (myEmail) {
+          storageService.saveLocalChatList(myEmail, formattedList);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to refresh conversation list:', err);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
     }
-    setChatPreviews(previews);
-
-    // Fetch pending friend requests
-    const reqs = await fetchFriendRequests(currentUser.email);
-    setReceivedRequests(reqs.received || []);
-    setSentRequests(reqs.sent || []);
-
-    setIsLoading(false);
-  };
+  }, [myEmail]);
 
   useEffect(() => {
-    let isMounted = true;
+    loadConversations();
+    const interval = setInterval(loadConversations, 15000);
+    return () => clearInterval(interval);
+  }, [loadConversations]);
 
-    const poll = async () => {
-      if (!currentUser) return;
-      await loadChats();
-    };
-
-    poll();
-    const interval = setInterval(poll, 3500);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [currentUser]);
-
-  const handleSearchFriend = async (text) => {
-    setFriendSearchInput(text);
-    if (!text.trim()) {
-      setSearchResults([]);
-      setModalFeedback('');
-      return;
-    }
-    setIsSearching(true);
-    setModalFeedback('');
-    try {
-      const results = await searchUsers(text, currentUser?.email || '');
-      setSearchResults(results);
-      if (results.length === 0) {
-        setModalFeedback(`No users found matching "${text}". Try searching by User ID (e.g. iam_go_5800) or email.`);
-      }
-    } catch (err) {
-      setModalFeedback('Error searching for users.');
-    } finally {
-      setIsSearching(false);
-    }
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await loadConversations();
   };
 
-  // Friend Request Actions
-  const handleSendRequestSubmit = async (targetUser) => {
-    setAddingFriendEmail(targetUser.email);
-    setModalFeedback('');
-    try {
-      const queryKey = targetUser.uid || targetUser.email;
-      await sendFriendRequest(currentUser.email, queryKey);
-      setSentRequests(prev => [...prev, targetUser.email.toLowerCase()]);
-      setModalFeedback(`📩 Friend request sent to ${targetUser.displayName || targetUser.email}!`);
-      await loadChats();
-    } catch (err) {
-      setModalFeedback(`⚠️ ${err.message || 'Failed to send friend request'}`);
-    } finally {
-      setAddingFriendEmail('');
-    }
-  };
+  const filteredChats = chatList.filter(c =>
+    (c.displayName && c.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (c.nativeLang && c.nativeLang.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
-  const handleAcceptRequest = async (senderEmail) => {
-    try {
-      await acceptFriendRequest(currentUser.email, senderEmail);
-      setLocalAddedFriends(prev => [...prev, senderEmail]);
-      await loadChats();
-    } catch (err) {
-      Alert.alert('Error', err.message || 'Failed to accept friend request');
-    }
-  };
-
-  const handleDeclineRequest = async (senderEmail) => {
-    try {
-      await declineFriendRequest(currentUser.email, senderEmail);
-      await loadChats();
-    } catch (err) {
-      Alert.alert('Error', err.message || 'Failed to decline friend request');
-    }
-  };
-
-  // Contacts = Only users explicitly added as friends or with active chat history
-  const friendList = [
-    ...(myProfile?.friends || []),
-    ...(currentUser?.friends || []),
-    ...localAddedFriends
-  ];
-
-  const contactUsers = userList.filter(u => {
-    const isFriend = friendList.some(f =>
-      f.toLowerCase() === u.email.toLowerCase() ||
-      (u.uid && f.toLowerCase() === u.uid.toLowerCase())
-    ) || !!chatPreviews[u.email];
-
-    if (!isFriend) return false;
-
-    return (
-      (u.displayName && u.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (u.uid && u.uid.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
-  });
-
-  // Chats = Only contacts with whom you have active message history
-  const chatUsers = contactUsers.filter(u => !!chatPreviews[u.email]);
-
-  const currentTabUsers = activeTab === 'chats' ? chatUsers : contactUsers;
+  const topPadding = (insets.top > 0 ? insets.top : (Platform.OS === 'ios' ? 48 : 20)) + 6;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.headerBg} />
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPadding }]}>
+        <View>
+          <Text style={styles.headerTitle}>Chats</Text>
+          <Text style={styles.headerSub}>
+            {chatList.length} registered {chatList.length === 1 ? 'partner' : 'partners'}
+          </Text>
+        </View>
 
-      {/* Top Header Bar */}
-      <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>
-          {activeTab === 'chats' ? 'ViveTalk' : 'Contacts'}
-        </Text>
+        <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh} activeOpacity={0.7}>
+          <FontAwesome name="refresh" size={15} color="#4B1A56" />
+        </TouchableOpacity>
       </View>
-
-
 
       {/* Search Input Bar */}
       <View style={styles.searchContainer}>
-        <TextInput
-          style={[styles.searchInput, { backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }]}
-          placeholder={activeTab === 'chats' ? "Search active chats..." : "Search contacts by name, email, or User ID..."}
-          placeholderTextColor={theme.subtext}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      {/* Pending Friend Requests Section (Shown on Contacts tab if requests exist) */}
-      {activeTab === 'contacts' && receivedRequests.length > 0 && (
-        <View style={styles.requestsSection}>
-          <View style={styles.requestsHeaderRow}>
-            <Text style={[styles.requestsHeaderTitle, { color: theme.primary }]}>
-              📩 PENDING FRIEND REQUESTS ({receivedRequests.length})
-            </Text>
-          </View>
-
-          {receivedRequests.map(reqUser => (
-            <View key={reqUser.email} style={[styles.requestCard, { backgroundColor: theme.card, borderColor: theme.primary }]}>
-              <View style={[styles.requestAvatar, { backgroundColor: reqUser.avatarColor || theme.primary }]}>
-                <Text style={styles.requestAvatarText}>
-                  {reqUser.displayName ? reqUser.displayName.charAt(0).toUpperCase() : 'U'}
-                </Text>
-              </View>
-
-              <View style={styles.requestInfo}>
-                <Text style={[styles.requestName, { color: theme.text }]}>
-                  {reqUser.displayName || reqUser.email}
-                </Text>
-                <Text style={[styles.requestId, { color: theme.primary }]}>
-                  🆔 {reqUser.uid || 'user_id'}
-                </Text>
-              </View>
-
-              <View style={styles.requestActionRow}>
-                <TouchableOpacity
-                  style={[styles.acceptBtn, { backgroundColor: '#10B981' }]}
-                  onPress={() => handleAcceptRequest(reqUser.email)}
-                >
-                  <Text style={styles.actionBtnText}>✅ Accept</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.declineBtn, { backgroundColor: '#EF4444' }]}
-                  onPress={() => handleDeclineRequest(reqUser.email)}
-                >
-                  <Text style={styles.actionBtnText}>✕ Decline</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
+        <View style={styles.searchBar}>
+          <FontAwesome name="search" size={15} color="#80737d" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search partners by name or language..."
+            placeholderTextColor="#80737d"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <FontAwesome name="times-circle" size={15} color="#80737d" />
+            </TouchableOpacity>
+          )}
         </View>
-      )}
-
-      {/* Section Header */}
-      <View style={styles.sectionHeaderRow}>
-        <Text style={[styles.sectionTitle, { color: theme.subtext }]}>
-          {activeTab === 'chats' ? 'ACTIVE CONVERSATIONS' : `FRIENDS LIST (${contactUsers.length})`}
-        </Text>
-        {activeTab === 'contacts' && (
-          <TouchableOpacity
-            style={styles.addFriendTextLink}
-            onPress={() => {
-              setShowAddFriendModal(true);
-              setFriendSearchInput('');
-              setSearchResults([]);
-              setModalFeedback('');
-            }}
-          >
-            <Text style={[styles.addFriendTextLinkTitle, { color: theme.primary }]}>🔍 Search & Add Friend</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
-      {/* Main List Rendering */}
-      <FlatList
-        data={currentTabUsers}
-        keyExtractor={item => item.uid || item.email}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item, index }) => {
-          const preview = chatPreviews[item.email];
-          const initial = item.displayName ? item.displayName.charAt(0).toUpperCase() : item.email.charAt(0).toUpperCase();
-          const avatarBg = AVATAR_COLORS[index % AVATAR_COLORS.length];
-
-          return (
+      {/* Chats List */}
+      {loading ? (
+        <View style={styles.centerLoading}>
+          <ActivityIndicator size="large" color="#4B1A56" />
+          <Text style={styles.loadingText}>Loading conversations...</Text>
+        </View>
+      ) : filteredChats.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconCircle}>
+            <FontAwesome name="comment-o" size={32} color="#4B1A56" />
+          </View>
+          <Text style={styles.emptyTitle}>No Conversations Yet</Text>
+          <Text style={styles.emptySub}>
+            Register another account or find language partners in the Matches tab to start chatting!
+          </Text>
+          <TouchableOpacity style={styles.refreshEmptyBtn} onPress={onRefresh} activeOpacity={0.8}>
+            <FontAwesome name="refresh" size={14} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={styles.refreshEmptyBtnText}>Refresh Chats</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredChats}
+          keyExtractor={item => item.email}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+          renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.chatRow, { borderBottomColor: theme.border }]}
-              onPress={() => onSelectChat(item.email)}
+              style={styles.chatRow}
+              onPress={() => onSelectChat && onSelectChat(item.email)}
               activeOpacity={0.7}
             >
-              <View style={styles.avatarWrapper}>
-                <View style={[styles.contactAvatar, { backgroundColor: item.avatarColor || avatarBg }]}>
-                  {item.avatarUrl ? (
-                    <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} />
-                  ) : (
-                    <Text style={styles.contactAvatarText}>{initial}</Text>
-                  )}
-                </View>
-                <View style={[styles.onlineDot, { borderColor: theme.card }]} />
+              {/* Avatar & Online Dot */}
+              <View style={styles.avatarContainer}>
+                <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                <View style={styles.onlineDot} />
               </View>
 
+              {/* Chat Info */}
               <View style={styles.chatInfo}>
-                <View style={styles.titleRow}>
-                  <Text style={[styles.contactName, { color: theme.text }]} numberOfLines={1}>
-                    {item.displayName || item.email}
+                <View style={styles.chatHeaderRow}>
+                  <Text style={styles.partnerName} numberOfLines={1}>
+                    {item.displayName}
                   </Text>
-                  {activeTab === 'chats' && preview && (
-                    <Text style={[styles.timestamp, { color: theme.subtext }]}>
-                      {preview.timestamp || '12:50 PM'}
-                    </Text>
-                  )}
+                  <Text style={styles.timestampText}>{item.timestamp}</Text>
                 </View>
 
-                <View style={styles.subRow}>
-                  <Text style={[styles.userIdBadge, { color: theme.primary }]}>
-                    🆔 {item.uid || 'sayflash_user'}
-                  </Text>
-                  <Text style={[styles.langTagText, { color: theme.subtext }]}>
-                    • {item.nativeLanguage === 'zh' ? 'Chinese 🇨🇳' : 'English 🇺🇸'}
+                {/* Language Pair Pill */}
+                <View style={styles.langPairRow}>
+                  <Text style={styles.langPillText}>
+                    {item.nativeFlag} {item.nativeLang} ⇄ {item.targetFlag} {item.learningLang}
                   </Text>
                 </View>
 
-                <Text style={[styles.previewText, { color: theme.subtext }]} numberOfLines={1}>
-                  {activeTab === 'chats'
-                    ? preview ? preview.originalText : 'No messages yet'
-                    : `Tap to open instant real-time translation chat`}
+                <Text style={styles.lastMsgText} numberOfLines={1}>
+                  {item.lastMessage}
                 </Text>
               </View>
-
-              {activeTab === 'contacts' && (
-                <TouchableOpacity
-                  style={[styles.chatActionBtn, { backgroundColor: theme.primary }]}
-                  onPress={() => onSelectChat(item.email)}
-                >
-                  <Text style={styles.chatActionBtnText}>💬 Chat</Text>
-                </TouchableOpacity>
-              )}
             </TouchableOpacity>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            {isLoading ? (
-              <ActivityIndicator color={theme.primary} size="large" />
-            ) : activeTab === 'chats' ? (
-              <>
-                <Text style={styles.emptyIconText}>💬</Text>
-                <Text style={[styles.emptyTitle, { color: theme.text }]}>No Active Conversations</Text>
-                <Text style={[styles.emptyText, { color: theme.subtext }]}>
-                  You don't have any ongoing chat threads yet. Select a contact from your Phonebook to start talking!
-                </Text>
-                <TouchableOpacity
-                  style={[styles.emptyAddBtn, { backgroundColor: theme.primary }]}
-                  onPress={() => handleTabChange('contacts')}
-                >
-                  <Text style={styles.emptyAddBtnText}>📇 Go to Contacts & Phonebook</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.emptyIconText}>📇</Text>
-                <Text style={[styles.emptyTitle, { color: theme.text }]}>There's no contact yet</Text>
-                <Text style={[styles.emptyText, { color: theme.subtext }]}>
-                  Your friends list is currently empty. Send a friend request using their User ID or email to connect!
-                </Text>
-                <TouchableOpacity
-                  style={[styles.emptyAddBtn, { backgroundColor: theme.primary }]}
-                  onPress={() => {
-                    setShowAddFriendModal(true);
-                    setFriendSearchInput('');
-                    setSearchResults([]);
-                    setModalFeedback('');
-                  }}
-                >
-                  <Text style={styles.emptyAddBtnText}>➕ Add a Friend Now</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        }
-      />
-
-      {/* 🔍 SEARCH & ADD FRIEND MODAL */}
-      <Modal visible={showAddFriendModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.addFriendModalCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={[styles.modalTitle, { color: theme.text }]}>🔍 Find Friends</Text>
-                <Text style={[styles.modalSub, { color: theme.subtext }]}>
-                  Your User ID: <Text style={{ color: theme.primary, fontWeight: '700' }}>{displayUser?.uid || 'iam_go_user'}</Text>
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.closeModalBtn, { backgroundColor: theme.cardSecondary }]}
-                onPress={() => setShowAddFriendModal(false)}
-              >
-                <Text style={[styles.closeModalBtnText, { color: theme.text }]}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Search Input */}
-            <View style={styles.modalSearchBox}>
-              <TextInput
-                style={[styles.modalSearchInput, { backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }]}
-                placeholder="Enter User ID (e.g. iam_go_5800) or Email..."
-                placeholderTextColor={theme.subtext}
-                value={friendSearchInput}
-                onChangeText={handleSearchFriend}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {isSearching && <ActivityIndicator style={styles.searchSpinner} color={theme.primary} />}
-            </View>
-
-            {/* Modal Feedback Banner */}
-            {!!modalFeedback && (
-              <View style={[styles.feedbackBanner, { backgroundColor: modalFeedback.includes('✅') || modalFeedback.includes('📩') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
-                <Text style={[styles.feedbackText, { color: modalFeedback.includes('✅') || modalFeedback.includes('📩') ? '#10B981' : '#F87171' }]}>
-                  {modalFeedback}
-                </Text>
-              </View>
-            )}
-
-            {/* Search Results List */}
-            <FlatList
-              data={searchResults}
-              keyExtractor={item => item.uid || item.email}
-              style={styles.modalResultsList}
-              renderItem={({ item }) => {
-                const initial = item.displayName ? item.displayName.charAt(0).toUpperCase() : item.email.charAt(0).toUpperCase();
-                const isAdding = addingFriendEmail === item.email;
-                const isAlreadyFriend = friendList.some(f => f.toLowerCase() === item.email.toLowerCase() || (item.uid && f.toLowerCase() === item.uid.toLowerCase()));
-                const isPendingSent = sentRequests.some(s => s.toLowerCase() === item.email.toLowerCase());
-                const isReceivedReq = receivedRequests.some(r => r.email.toLowerCase() === item.email.toLowerCase());
-
-                return (
-                  <View style={[styles.friendResultCard, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-                    <View style={[styles.resultAvatar, { backgroundColor: item.avatarColor || theme.primary }]}>
-                      <Text style={styles.resultAvatarText}>{initial}</Text>
-                    </View>
-
-                    <View style={styles.resultDetails}>
-                      <Text style={[styles.resultName, { color: theme.text }]}>{item.displayName || 'Sayflash User'}</Text>
-                      <Text style={[styles.resultId, { color: theme.primary }]}>🆔 ID: {item.uid || 'user_id'}</Text>
-                      <Text style={[styles.resultEmail, { color: theme.subtext }]}>{item.email}</Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.addResultBtn,
-                        {
-                          backgroundColor: isAlreadyFriend
-                            ? '#10B981'
-                            : isReceivedReq
-                            ? '#3B82F6'
-                            : isPendingSent
-                            ? theme.cardSecondary
-                            : theme.primary
-                        }
-                      ]}
-                      onPress={() => {
-                        if (isAlreadyFriend) {
-                          setShowAddFriendModal(false);
-                          onSelectChat(item.email);
-                        } else if (isReceivedReq) {
-                          handleAcceptRequest(item.email);
-                        } else if (!isPendingSent) {
-                          handleSendRequestSubmit(item);
-                        }
-                      }}
-                      disabled={isAdding || isPendingSent}
-                    >
-                      {isAdding ? (
-                        <ActivityIndicator color="#FFFFFF" size="small" />
-                      ) : (
-                        <Text style={[styles.addResultBtnText, isPendingSent && { color: theme.subtext }]}>
-                          {isAlreadyFriend
-                            ? '💬 Chat'
-                            : isReceivedReq
-                            ? '✅ Accept'
-                            : isPendingSent
-                            ? '⏳ Pending'
-                            : '📩 Request'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              }}
-              ListEmptyComponent={
-                !isSearching && !friendSearchInput ? (
-                  <View style={styles.emptyModalState}>
-                    <Text style={styles.emptyModalIcon}>👥</Text>
-                    <Text style={[styles.emptyModalTitle, { color: theme.text }]}>Find Friends by User ID</Text>
-                    <Text style={[styles.emptyModalSub, { color: theme.subtext }]}>
-                      Type a friend's unique User ID (like <Text style={{ color: theme.primary }}>iam_go_5800</Text>) or email address above to send them a friend request!
-                    </Text>
-                  </View>
-                ) : null
-              }
-            />
-          </View>
-        </View>
-      </Modal>
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -535,442 +283,199 @@ export default function ChatListScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FAF5FA',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
+    borderBottomColor: '#F3E8FF',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#320034',
+    letterSpacing: -0.5,
   },
-  userProfileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  userAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 999,
-  },
-  userAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  userName: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  idBadgeRow: {
+  headerSub: {
+    fontSize: 12,
+    color: '#80737d',
+    fontWeight: '600',
     marginTop: 1,
   },
-  idBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  addFriendHeaderBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 14,
+  refreshBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FAF5FA',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  addFriendHeaderBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  iconBtn: {
-    padding: 4,
-  },
-  iconBtnText: {
-    fontSize: 18,
-  },
-  langBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 10,
-  },
-  langDropdown: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
     borderWidth: 1,
+    borderColor: '#F3E8FF',
   },
-  langDropdownText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  toggleBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  toggleBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
+
   searchContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5FA',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+  },
+  searchIcon: {
+    marginRight: 10,
   },
   searchInput: {
-    height: 38,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    fontSize: 13,
-  },
-  requestsSection: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  requestsHeaderRow: {
-    paddingVertical: 6,
-  },
-  requestsHeaderTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  requestCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 6,
-    gap: 10,
-  },
-  requestAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  requestAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 15,
-  },
-  requestInfo: {
     flex: 1,
+    fontSize: 13.5,
+    color: '#1c1b1f',
   },
-  requestName: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  requestId: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  requestActionRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  acceptBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  declineBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  actionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  addFriendTextLink: {
-    paddingVertical: 2,
-  },
-  addFriendTextLinkTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
+
   listContent: {
+    paddingTop: 8,
     paddingHorizontal: 16,
-    paddingBottom: 90,
+    gap: 8,
   },
   chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  avatarWrapper: {
+  avatarContainer: {
     position: 'relative',
+    marginRight: 14,
   },
-  contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  contactAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 18,
+  avatarImg: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: '#4B1A56',
   },
   onlineDot: {
     position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    bottom: 0,
+    right: 0,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
     backgroundColor: '#10B981',
     borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
+
   chatInfo: {
     flex: 1,
+    gap: 2,
   },
-  titleRow: {
+  chatHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
   },
-  contactName: {
-    fontSize: 15,
-    fontWeight: '700',
+  partnerName: {
+    fontSize: 15.5,
+    fontWeight: '800',
+    color: '#1c1b1f',
+    letterSpacing: -0.2,
+    flex: 1,
   },
-  timestamp: {
+  timestampText: {
     fontSize: 11,
+    color: '#80737d',
+    fontWeight: '600',
+    marginLeft: 6,
   },
-  subRow: {
+  langPairRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-    gap: 4,
+    marginVertical: 2,
   },
-  userIdBadge: {
+  langPillText: {
     fontSize: 11,
+    color: '#4B1A56',
     fontWeight: '700',
+    backgroundColor: '#FFF0FA',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
-  previewText: {
-    fontSize: 12,
+  lastMsgText: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
   },
-  langTagText: {
-    fontSize: 11,
-  },
-  chatActionBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  chatActionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  emptyState: {
-    alignItems: 'center',
+
+  // Center Loading & Empty State
+  centerLoading: {
+    flex: 1,
     justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
+    alignItems: 'center',
+    gap: 12,
   },
-  emptyIconText: {
-    fontSize: 48,
-    marginBottom: 10,
+  loadingText: {
+    fontSize: 13,
+    color: '#80737d',
+    fontWeight: '600',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFF0FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '800',
+    color: '#320034',
     marginBottom: 6,
   },
-  emptyText: {
+  emptySub: {
     fontSize: 13,
+    color: '#80737d',
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: 16,
   },
-  emptyAddBtn: {
+  refreshEmptyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4B1A56',
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 14,
+    borderRadius: 16,
   },
-  emptyAddBtnText: {
+  refreshEmptyBtnText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  addFriendModalCard: {
-    width: '100%',
-    maxWidth: 440,
-    maxHeight: '85%',
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  modalSub: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  closeModalBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeModalBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  modalSearchBox: {
-    position: 'relative',
-    marginBottom: 12,
-  },
-  modalSearchInput: {
-    height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    fontSize: 14,
-  },
-  searchSpinner: {
-    position: 'absolute',
-    right: 12,
-    top: 12,
-  },
-  feedbackBanner: {
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 12,
-  },
-  feedbackText: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modalResultsList: {
-    maxHeight: 300,
-  },
-  friendResultCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 8,
-    gap: 12,
-  },
-  resultAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  resultAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  resultDetails: {
-    flex: 1,
-  },
-  resultName: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  resultId: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 1,
-  },
-  resultEmail: {
-    fontSize: 11,
-  },
-  addResultBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-  },
-  addResultBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  emptyModalState: {
-    alignItems: 'center',
-    paddingVertical: 30,
-  },
-  emptyModalIcon: {
-    fontSize: 40,
-    marginBottom: 8,
-  },
-  emptyModalTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  emptyModalSub: {
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: 20,
   },
 });

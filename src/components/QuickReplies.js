@@ -1,35 +1,33 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { DARK_THEME } from '../theme/colors';
+import { FontAwesome } from '@expo/vector-icons';
 
-const QUICK_REPLIES = [
-  'How are you doing?',
-  'What are you up to right now?',
-  'Have you eaten yet?',
-  'Let us meet up tomorrow!',
+const DEFAULT_QUICK_REPLIES = [
+  '👋 Hi! Nice to meet you!',
+  '☕ How is your day going?',
+  '📚 What languages are you learning?',
+  '🍜 Have you eaten yet?',
+  '🎙️ Would you like to practice voice notes?',
+  '✨ Let us chat!',
 ];
 
-export default function QuickReplies({ onSelectReply, theme = DARK_THEME }) {
-  const isDark = theme.mode === 'dark';
-
+export default function QuickReplies({ onSelectReply, theme }) {
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      <Text style={[styles.sectionHeader, { color: theme.subtext }]}>SMART REPLIES:</Text>
+    <View style={styles.container}>
+      <View style={styles.headerRow}>
+        <FontAwesome name="lightbulb-o" size={12} color="#4B1A56" style={{ marginRight: 5 }} />
+        <Text style={styles.sectionHeader}>SMART REPLIES:</Text>
+      </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {QUICK_REPLIES.map((reply, idx) => (
+        {DEFAULT_QUICK_REPLIES.map((reply, idx) => (
           <TouchableOpacity
             key={idx}
-            style={[
-              styles.replyChip,
-              {
-                backgroundColor: isDark ? 'rgba(30, 41, 59, 0.7)' : '#FFFFFF',
-                borderColor: theme.border,
-              }
-            ]}
+            style={styles.replyChip}
             onPress={() => onSelectReply(reply)}
+            activeOpacity={0.8}
           >
-            <Text style={[styles.replyText, { color: isDark ? '#60A5FA' : '#2563EB' }]}>{reply}</Text>
+            <Text style={styles.replyText}>{reply}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -39,26 +37,38 @@ export default function QuickReplies({ onSelectReply, theme = DARK_THEME }) {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 6,
+    paddingVertical: 5,
     paddingHorizontal: 14,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F3E8FF',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   sectionHeader: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 6,
+    color: '#80737d',
+    letterSpacing: 0.6,
   },
   scrollContent: {
-    gap: 8,
+    gap: 6,
+    paddingBottom: 2,
   },
   replyChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#FFF0FA',
     borderWidth: 1,
+    borderColor: '#F3E8FF',
   },
   replyText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4B1A56',
   },
 });

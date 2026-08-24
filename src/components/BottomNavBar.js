@@ -1,202 +1,197 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  Platform,
+  Animated,
+  Dimensions,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { authService } from '../services/authService';
 
-let BlurView = null;
-try {
-  BlurView = require('expo-blur').BlurView;
-} catch (e) {
-  BlurView = null;
-}
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-export default function BottomNavBar({ activeTab, onSelectTab, theme }) {
-  const tabs = [
-    { id: 'chats', label: 'Chats', icon: 'comments' },
-    { id: 'contacts', label: 'Contacts', icon: 'users' },
-    { id: 'settings', label: 'Settings', icon: 'cog' },
-  ];
+const TABS = [
+  { id: 'home',    label: 'Home',     icon: 'home' },
+  { id: 'chats',   label: 'Chats',    icon: 'comment' },
+  { id: 'matches', label: 'Matches',  icon: 'users' },
+  { id: 'profile', label: 'Settings', icon: 'cog' },
+];
 
-  const isIOS = Platform.OS === 'ios';
+export default function BottomNavBar({ activeTab, onSelectTab, onTabChange, theme }) {
+  const insets = useSafeAreaInsets();
+  const handlePress = onSelectTab || onTabChange || (() => {});
+  const user = authService.getCurrentUser();
+  const isDark =
+    theme?.mode === 'dark' ||
+    theme?.bg === '#111111' ||
+    theme?.bg === '#121212' ||
+    user?.darkMode === true;
 
-  const renderTabButtons = () => (
-    tabs.map(tab => {
-      const isActive = activeTab === tab.id;
-      return (
-        <TouchableOpacity
-          key={tab.id}
-          style={[
-            styles.iosTabBtn,
-            isActive && [
-              styles.iosActiveTabPill,
-              {
-                backgroundColor: theme.mode === 'dark'
-                  ? 'rgba(99, 102, 241, 0.28)'
-                  : 'rgba(99, 102, 241, 0.15)',
-                borderColor: theme.primary,
-              }
-            ]
-          ]}
-          onPress={() => onSelectTab(tab.id)}
-          activeOpacity={0.7}
-        >
-          <FontAwesome
-            name={tab.icon}
-            size={18}
-            color={isActive ? theme.primary : theme.subtext}
-          />
-          <Text
-            style={[
-              styles.tabLabel,
-              { color: isActive ? theme.primary : theme.subtext },
-              isActive && styles.tabLabelActive
-            ]}
-          >
-            {tab.label}
-          </Text>
-        </TouchableOpacity>
-      );
-    })
-  );
+  const activeIndex = Math.max(0, TABS.findIndex(t => t.id === activeTab));
 
-  // --- iOS Liquid Glass Navigation Bar ---
-  if (isIOS) {
-    if (BlurView) {
-      return (
-        <View style={styles.iosFloatingWrapper}>
-          <BlurView
-            intensity={85}
-            tint={theme.mode === 'dark' ? 'dark' : 'light'}
-            style={[
-              styles.iosGlassContainer,
-              {
-                borderColor: theme.mode === 'dark' ? 'rgba(255, 255, 255, 0.22)' : 'rgba(0, 0, 0, 0.12)',
-                backgroundColor: theme.mode === 'dark' ? 'rgba(15, 23, 42, 0.7)' : 'rgba(255, 255, 255, 0.8)',
-              }
-            ]}
-          >
-            {renderTabButtons()}
-          </BlurView>
-        </View>
-      );
-    }
+  // ── Layout measurement ──
+  const [barWidth, setBarWidth] = useState(0);
+  const tabWidth = barWidth > 0 ? barWidth / TABS.length : 0;
 
-    // Pure React Native Liquid Glass Fallback (Works even without expo-blur)
-    return (
-      <View style={styles.iosFloatingWrapper}>
-        <View
-          style={[
-            styles.iosGlassContainer,
-            {
-              borderColor: theme.mode === 'dark' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.12)',
-              backgroundColor: theme.mode === 'dark' ? 'rgba(15, 23, 42, 0.88)' : 'rgba(255, 255, 255, 0.92)',
-            }
-          ]}
-        >
-          {renderTabButtons()}
-        </View>
-      </View>
-    );
-  }
+  // ── Sliding pill spring animation ──
+  const slideX = useRef(new Animated.Value(0)).current;
 
-  // --- Android Standard Material Bottom Navigation Bar ---
+  useEffect(() => {
+    if (tabWidth <= 0) return;
+    Animated.spring(slideX, {
+      toValue: activeIndex * tabWidth,
+      damping: 18,
+      stiffness: 170,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [activeIndex, tabWidth]);
+
+  // ── Blur Tint selection ──
+  const blurTint = Platform.OS === 'ios'
+    ? (isDark ? 'systemThinMaterialDark' : 'systemThinMaterial')
+    : (isDark ? 'dark' : 'light');
+
+  // ── Dynamic Colors ──
+  const dockBg      = isDark ? 'rgba(20, 20, 20, 0.75)' : 'rgba(255, 255, 255, 0.75)';
+  const dockBorder  = isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)';
+  const pillBg      = isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.05)';
+  const pillBorder  = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.05)';
+  const activeColor = isDark ? '#FFFFFF' : '#1c1b1f';
+  const mutedColor  = isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(60, 60, 67, 0.60)';
+
+  const bottomPosition = insets.bottom > 0 ? insets.bottom : 16;
+
   return (
-    <View style={[styles.androidNavContainer, { backgroundColor: theme.headerBg, borderTopColor: theme.border }]}>
-      {tabs.map(tab => {
-        const isActive = activeTab === tab.id;
-        return (
-          <TouchableOpacity
-            key={tab.id}
-            style={styles.androidTabBtn}
-            onPress={() => onSelectTab(tab.id)}
-            activeOpacity={0.7}
+    <View style={[styles.wrapper, { bottom: bottomPosition }]} pointerEvents="box-none">
+      <View style={[styles.shadow, isDark && styles.shadowDark]}>
+        <BlurView
+          intensity={Platform.OS === 'ios' ? 80 : 90}
+          tint={blurTint}
+          style={[
+            styles.dock,
+            { backgroundColor: dockBg, borderColor: dockBorder },
+          ]}
+        >
+          {/* Tabs container */}
+          <View
+            style={styles.tabsRow}
+            onLayout={e => {
+              const w = e.nativeEvent.layout.width;
+              if (w > 0 && w !== barWidth) setBarWidth(w);
+            }}
           >
-            <View style={[styles.androidIconPill, isActive && { backgroundColor: theme.mode === 'dark' ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.12)' }]}>
-              <FontAwesome
-                name={tab.icon}
-                size={20}
-                color={isActive ? theme.primary : theme.subtext}
+            {/* ── Sliding active tab pill indicator ── */}
+            {tabWidth > 0 && (
+              <Animated.View
+                style={[
+                  styles.pill,
+                  {
+                    width: tabWidth - 10,
+                    backgroundColor: pillBg,
+                    borderColor: pillBorder,
+                    transform: [{ translateX: Animated.add(slideX, 5) }],
+                  },
+                ]}
               />
-            </View>
-            <Text style={[styles.tabLabel, { color: isActive ? theme.primary : theme.subtext }, isActive && styles.tabLabelActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
+            )}
+
+            {/* ── Tab Items ── */}
+            {TABS.map(tab => {
+              const isActive = activeTab === tab.id;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  style={styles.tabBtn}
+                  onPress={() => handlePress(tab.id)}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome
+                    name={tab.icon}
+                    size={20}
+                    color={isActive ? activeColor : mutedColor}
+                  />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      {
+                        color: isActive ? activeColor : mutedColor,
+                        fontWeight: isActive ? '600' : '400',
+                      },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </BlurView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // iOS Floating Liquid Glass Styles
-  iosFloatingWrapper: {
+  wrapper: {
     position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
+    left: 16,
+    right: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 99,
+    zIndex: 999,
   },
-  iosGlassContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
+  shadow: {
     width: '100%',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 32,
+    maxWidth: 420,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  shadowDark: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+  },
+  dock: {
+    borderRadius: 36,
+    overflow: 'hidden',
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
+  tabsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    height: 56,
+    position: 'relative',
+  },
+  pill: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 0,
+    borderRadius: 28,
+    borderWidth: 1,
     overflow: 'hidden',
   },
-  iosTabBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 22,
-    gap: 6,
-  },
-  iosActiveTabPill: {
-    borderWidth: 1,
-  },
-
-  // Android Material Standard Styles
-  androidNavContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderTopWidth: 1,
-    elevation: 8,
-  },
-  androidTabBtn: {
+  tabBtn: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 4,
+    gap: 3,
+    zIndex: 2,
   },
-  androidIconPill: {
-    paddingVertical: 4,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    marginBottom: 2,
-  },
-
-  // Common Typography
   tabLabel: {
     fontSize: 11,
-    fontWeight: '500',
-  },
-  tabLabelActive: {
-    fontWeight: '800',
+    letterSpacing: -0.2,
   },
 });

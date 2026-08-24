@@ -7,10 +7,13 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { translateWithGemini } from './geminiService';
 
-const BACKEND_TUNNEL_URL = 'https://channels-possibilities-chamber-hidden.trycloudflare.com';
+const BACKEND_TUNNEL_URL = "";
 
 export const getApiBaseUrl = () => {
-  return `${BACKEND_TUNNEL_URL}/api`;
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    return window.location.origin + "/api";
+  }
+  return "https://vivetalk.sayflash.id/api";
 };
 
 /**
@@ -42,6 +45,7 @@ export async function fetchUserList() {
   try {
     const res = await fetch(`${getApiBaseUrl()}/users`);
     const data = await res.json();
+    if (Array.isArray(data)) return data;
     return data.users || [];
   } catch (err) {
     console.warn('Failed to fetch user list:', err);
@@ -232,7 +236,17 @@ export async function sendRawSignal(senderEmail, senderName, recipientEmail, tex
 /**
  * Send peer-to-peer message with real-time AI translation
  */
-export async function sendPeerMessage(senderEmail, senderName, recipientEmail, text, tone = 'casual') {
+export async function sendPeerMessage(
+  senderEmail,
+  senderName,
+  recipientEmail,
+  text,
+  tone = 'casual',
+  targetLang = 'en',
+  translatedText = '',
+  pinyin = '',
+  culturalNote = null
+) {
   try {
     const res = await fetch(`${getApiBaseUrl()}/chat/send`, {
       method: 'POST',
@@ -242,7 +256,12 @@ export async function sendPeerMessage(senderEmail, senderName, recipientEmail, t
         senderName,
         recipientEmail,
         text,
+        originalText: text,
         tone,
+        targetLang,
+        translatedText: translatedText || text,
+        pinyin: pinyin || '',
+        culturalNote: culturalNote || null
       }),
     });
 
@@ -252,7 +271,7 @@ export async function sendPeerMessage(senderEmail, senderName, recipientEmail, t
     }
     return data.message;
   } catch (err) {
-    console.warn('Failed to send peer message to Golang backend:', err);
+    console.warn('Failed to send peer message:', err);
     throw err;
   }
 }
@@ -263,9 +282,10 @@ export async function fetchPeerMessages(user1, user2) {
   try {
     const res = await fetch(`${getApiBaseUrl()}/chat/messages?user1=${encodeURIComponent(user1)}&user2=${encodeURIComponent(user2)}`);
     const data = await res.json();
+    if (Array.isArray(data)) return data;
     return data.messages || [];
   } catch (err) {
-    console.warn('Failed to fetch peer messages from Golang backend:', err);
+    console.warn('Failed to fetch peer messages from backend:', err);
     return [];
   }
 }

@@ -5,15 +5,16 @@ import {
   View,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { getApiBaseUrl } from '../services/translationService';
 
 export default function TestCallScreen({ onBack, currentUser }) {
+  const insets = useSafeAreaInsets();
   const [logs, setLogs] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -286,15 +287,17 @@ export default function TestCallScreen({ onBack, currentUser }) {
     }
   };
 
+  const topPadding = (insets.top > 0 ? insets.top : (Platform.OS === 'ios' ? 48 : 20)) + 6;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Top Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: topPadding }]}>
         <TouchableOpacity style={styles.backBtn} onPress={onBack}>
           <FontAwesome name="arrow-left" size={18} color="#FFFFFF" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>📞 Call Hardware Diagnostics</Text>
+        <Text style={styles.headerTitle}>📞 Call Diagnostics</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -401,7 +404,7 @@ export default function TestCallScreen({ onBack, currentUser }) {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

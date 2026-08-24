@@ -7,10 +7,55 @@ import {
   Image,
   ScrollView,
   TextInput,
-  Alert
+  Alert,
+  Platform,
+  Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
-import { DARK_THEME } from '../theme/colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Speech from 'expo-speech';
+import { voiceService } from '../services/voiceService';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const LANGUAGE_META = [
+  { id: 'zh', name: 'Chinese', flag: '🇨🇳', aliases: ['zh', 'chinese', 'mandarin', 'zhongwen', '中文', 'cmn'] },
+  { id: 'id', name: 'Indonesian', flag: '🇮🇩', aliases: ['id', 'indonesian', 'indonesia', 'bahasa', 'bahasaindonesia'] },
+  { id: 'en', name: 'English', flag: '🇺🇸', aliases: ['en', 'english', 'eng', 'us', 'uk'] },
+  { id: 'ja', name: 'Japanese', flag: '🇯🇵', aliases: ['ja', 'jp', 'japanese', 'nihongo', '日本語'] },
+  { id: 'ko', name: 'Korean', flag: '🇰🇷', aliases: ['ko', 'korean', 'hangul', '한국어'] },
+  { id: 'es', name: 'Spanish', flag: '🇪🇸', aliases: ['es', 'spanish', 'espanol', 'español'] },
+  { id: 'fr', name: 'French', flag: '🇫🇷', aliases: ['fr', 'french', 'francais', 'français'] },
+  { id: 'de', name: 'German', flag: '🇩🇪', aliases: ['de', 'german', 'deutsch'] },
+  { id: 'ar', name: 'Arabic', flag: '🇸🇦', aliases: ['ar', 'arabic', 'alarabiya', 'العربية'] },
+  { id: 'it', name: 'Italian', flag: '🇮🇹', aliases: ['it', 'italian', 'italiano'] },
+  { id: 'pt', name: 'Portuguese', flag: '🇵🇹', aliases: ['pt', 'portuguese', 'portugues', 'português'] },
+  { id: 'ru', name: 'Russian', flag: '🇷🇺', aliases: ['ru', 'russian', 'russkiy', 'русский'] },
+];
+
+const getLangDetails = (raw) => {
+  if (!raw) return { name: 'English', flag: '🇺🇸' };
+  const clean = String(raw).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff]/gi, ' ').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+
+  for (const item of LANGUAGE_META) {
+    if (item.aliases.includes(clean)) return item;
+    for (const w of words) {
+      if (item.aliases.includes(w)) return item;
+    }
+  }
+
+  for (const item of LANGUAGE_META) {
+    for (const w of words) {
+      if (w.length >= 3 && (item.name.toLowerCase().startsWith(w) || w.startsWith(item.name.toLowerCase()))) {
+        return item;
+      }
+    }
+  }
+
+  return { name: raw, flag: '🌐' };
+};
 
 export default function FriendProfileScreen({
   partnerEmail,
@@ -23,26 +68,86 @@ export default function FriendProfileScreen({
   onClearHistory,
   onClose,
   onViewImage,
-  theme = DARK_THEME
+  theme
 }) {
+  const insets = useSafeAreaInsets();
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const isDark = theme.mode === 'dark';
 
-  // Extract shared media items (photos & documents sent in chat)
-  const sharedMedia = messages.filter(m => m.imageUri || (m.originalText && m.originalText.includes('Document:')));
-  const sharedVoiceNotes = messages.filter(m => m.isVoiceNote);
+  const displayName = partnerUser?.displayName || (partnerEmail ? partnerEmail.split('@')[0] : 'Partner');
+  const username = partnerUser?.username
+    ? (partnerUser.username.startsWith('@') ? partnerUser.username : `@${partnerUser.username}`)
+    : `@${displayName.toLowerCase().replace(/\s+/g, '_')}`;
 
-  // Filter messages by search query if non-empty
-  const searchResults = searchQuery.trim()
-    ? messages.filter(m =>
-        (m.originalText && m.originalText.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (m.translatedText && m.translatedText.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : [];
+  const avatar = partnerUser?.avatar || partnerUser?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=4B1A56&color=ffffff&size=256`;
+
+  const nativeDetails = getLangDetails(partnerUser?.nativeLanguage || 'en');
+  const learningDetails = getLangDetails(partnerUser?.learningLanguage || 'zh');
+  const learningLevel = (partnerUser?.learningLevel || 'Intermediate').toUpperCase();
+
+  const bio = partnerUser?.bio || 'Language exchange partner practicing conversational skills.';
+  const interests = Array.isArray(partnerUser?.interests) && partnerUser.interests.length > 0
+    ? partnerUser.interests
+    : ['☕ Coffee Shops', '✈️ Travel & Culture', '💻 Tech & Coding'];
+
+  const sharedMedia = messages.filter(m => m.imageUri);
+  const sharedVoiceNotes = messages.filter(m => m.isVoiceNote || m.audioUri);
+
+  const handlePlayVoiceIntro = async () => {
+    if (isPlayingAudio) {
+      voiceService.stopPlayback();
+      try { Speech.stop(); } catch (e) {}
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsPlayingAudio(false);
+      return;
+    }
+
+    setIsPlayingAudio(true);
+
+    const voiceUri = partnerUser?.voiceAudioUri;
+    const isRemoteHttp = voiceUri && (voiceUri.startsWith('http://') || voiceUri.startsWith('https://') || voiceUri.startsWith('data:'));
+
+    if (isRemoteHttp) {
+      const soundObj = await voiceService.playAudio(voiceUri, () => {
+        setIsPlayingAudio(false);
+      });
+      if (!soundObj) {
+        playSpeechFallback();
+      }
+    } else {
+      playSpeechFallback();
+    }
+  };
+
+  const playSpeechFallback = () => {
+    const textToSpeak = partnerUser?.voiceIntroText || `Hello! I am ${displayName}. Let's practice languages together!`;
+    const lang = partnerUser?.nativeLanguage || 'en';
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      const codeMap = { 'zh': 'zh-CN', 'id': 'id-ID', 'ja': 'ja-JP', 'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE', 'ko': 'ko-KR', 'en': 'en-US' };
+      utterance.lang = codeMap[lang.toLowerCase()] || 'en-US';
+      utterance.rate = 0.95;
+      utterance.onend = () => setIsPlayingAudio(false);
+      utterance.onerror = () => setIsPlayingAudio(false);
+      window.speechSynthesis.speak(utterance);
+    } else {
+      Speech.speak(textToSpeak, {
+        language: lang,
+        rate: 0.95,
+        onDone: () => setIsPlayingAudio(false),
+        onError: () => setIsPlayingAudio(false),
+        onStopped: () => setIsPlayingAudio(false),
+      });
+    }
+  };
 
   const handleConfirmClear = () => {
     Alert.alert(
-      "Clear Chat History",
+      "Clear Conversation History",
       "Are you sure you want to delete all messages in this conversation?",
       [
         { text: "Cancel", style: "cancel" },
@@ -50,180 +155,208 @@ export default function FriendProfileScreen({
           text: "Clear All",
           style: "destructive",
           onPress: () => {
-            onClearHistory();
-            onClose();
+            if (onClearHistory) onClearHistory();
+            if (onClose) onClose();
           }
         }
       ]
     );
   };
 
-  const getLangName = (code) => {
-    const langs = {
-      zh: 'Chinese (Simplified)',
-      es: 'Spanish',
-      ja: 'Japanese',
-      fr: 'French',
-      de: 'German',
-      ko: 'Korean',
-      en: 'English'
-    };
-    return langs[code] || 'Chinese (Simplified)';
-  };
-
-  const cardStyle = {
-    backgroundColor: theme.card,
-    borderColor: theme.border,
-  };
+  const topPadding = (insets.top > 0 ? insets.top : (Platform.OS === 'ios' ? 48 : 20)) + 6;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      {/* Top Header Bar */}
-      <View style={[styles.headerBar, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-        <TouchableOpacity style={[styles.backBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} onPress={onClose}>
-          <FontAwesome name="arrow-left" size={18} color={theme.text} />
+    <View style={styles.container}>
+      {/* Symmetrical Top Navigation Bar */}
+      <View style={[styles.headerBar, { paddingTop: topPadding }]}>
+        <TouchableOpacity style={styles.backBtn} onPress={onClose} activeOpacity={0.7}>
+          <FontAwesome name="arrow-left" size={17} color="#320034" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Contact Info</Text>
-        <View style={{ width: 36 }} />
+        <Text style={styles.headerTitle}>Partner Profile</Text>
+        <TouchableOpacity style={styles.headerActionBtn} onPress={onOpenLangPicker} activeOpacity={0.7}>
+          <FontAwesome name="globe" size={17} color="#4B1A56" />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Large Profile Hero Card */}
-        <View style={[styles.heroSection, cardStyle]}>
-          <View style={[styles.avatarCircle, { backgroundColor: partnerUser?.avatarColor || (isDark ? '#1E293B' : '#E2E8F0'), borderColor: '#38BDF8', overflow: 'hidden' }]}>
-            {partnerUser?.avatarUrl ? (
-              <Image source={{ uri: partnerUser.avatarUrl }} style={{ width: '100%', height: '100%', borderRadius: 50 }} />
-            ) : (
-              <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#FFFFFF' }}>
-                {partnerUser?.displayName ? partnerUser.displayName.charAt(0).toUpperCase() : (partnerEmail ? partnerEmail.charAt(0).toUpperCase() : 'F')}
-              </Text>
-            )}
-            <View style={[styles.onlineStatusBadge, { borderColor: theme.card }]} />
-          </View>
-          <Text style={[styles.friendName, { color: theme.text }]}>
-            {partnerUser?.displayName || (partnerEmail ? partnerEmail.split('@')[0] : 'Friend')}
-          </Text>
-          <Text style={[styles.friendEmail, { color: theme.subtext }]}>
-            {partnerEmail} {partnerUser?.uid ? `• 🆔 ${partnerUser.uid}` : ''}
-          </Text>
-          <Text style={styles.statusSubText}>Active now • BridgeTalk AI End-to-End Encrypted</Text>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 1. Hero Showcase Card with Avatar, Badge, and Quick Action Rings */}
+        <View style={styles.heroCard}>
+          <TouchableOpacity
+            style={styles.avatarShowcaseWrapper}
+            onPress={() => onViewImage && onViewImage(avatar)}
+            activeOpacity={0.85}
+          >
+            <Image source={{ uri: avatar }} style={styles.heroAvatarImg} />
+            <View style={styles.previewBadgeCircle}>
+              <FontAwesome name="search-plus" size={12} color="#FFFFFF" />
+            </View>
+            <View style={styles.onlineBadge}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.onlineText}>Active Now</Text>
+            </View>
+          </TouchableOpacity>
 
-          {/* Action Row: Call & Video Buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.callActionBtn} onPress={onStartVoiceCall}>
-              <FontAwesome name="phone" size={18} color="#38BDF8" />
-              <Text style={styles.callActionText}>Voice Call</Text>
+          <Text style={styles.heroNameText}>{displayName}</Text>
+          <Text style={styles.heroHandleText}>{username}</Text>
+          <Text style={styles.heroEmailText}>{partnerEmail}</Text>
+
+          {/* Quick Action Button Dock: Voice Call, Video Call, Translate */}
+          <View style={styles.quickActionDock}>
+            <TouchableOpacity style={styles.dockActionBtn} onPress={onStartVoiceCall} activeOpacity={0.8}>
+              <View style={[styles.dockIconCircle, { backgroundColor: '#FFF0FA' }]}>
+                <FontAwesome name="phone" size={18} color="#4B1A56" />
+              </View>
+              <Text style={styles.dockLabel}>Voice Call</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.callActionBtn} onPress={onStartVideoCall}>
-              <FontAwesome name="video-camera" size={18} color="#38BDF8" />
-              <Text style={styles.callActionText}>Video Call</Text>
+            <TouchableOpacity style={styles.dockActionBtn} onPress={onStartVideoCall} activeOpacity={0.8}>
+              <View style={[styles.dockIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                <FontAwesome name="video-camera" size={17} color="#7C3AED" />
+              </View>
+              <Text style={styles.dockLabel}>Video Call</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.dockActionBtn} onPress={onOpenLangPicker} activeOpacity={0.8}>
+              <View style={[styles.dockIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                <FontAwesome name="language" size={18} color="#2563EB" />
+              </View>
+              <Text style={styles.dockLabel}>Languages</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Search in Chat Section */}
-        <View style={[styles.sectionCard, cardStyle]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>🔍 Search Conversation</Text>
-          <View style={[styles.searchBarContainer, { backgroundColor: isDark ? '#0B0F19' : '#F1F5F9', borderColor: theme.border }]}>
-            <FontAwesome name="search" size={14} color={theme.subtext} style={{ marginRight: 8 }} />
-            <TextInput
-              style={[styles.searchInput, { color: theme.text }]}
-              placeholder="Search messages, translations, words..."
-              placeholderTextColor={theme.subtext}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <FontAwesome name="times-circle" size={16} color={theme.subtext} />
-              </TouchableOpacity>
-            )}
+        {/* 2. Real Voice Greeting Intro Player */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <FontAwesome name="microphone" size={14} color="#EC4899" style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>VOICE GREETING</Text>
           </View>
 
-          {/* Search Results Display */}
-          {searchQuery.trim().length > 0 && (
-            <View style={styles.searchResultsContainer}>
-              <Text style={styles.searchCountText}>
-                {searchResults.length} matching message{searchResults.length === 1 ? '' : 's'} found:
-              </Text>
-              {searchResults.map((m, idx) => (
-                <View key={m.id || idx} style={[styles.searchItemCard, { backgroundColor: isDark ? '#0B0F19' : '#F1F5F9', borderColor: theme.border }]}>
-                  <Text style={styles.searchItemSender}>
-                    {m.sender === 'user' ? 'You' : partnerEmail.split('@')[0]}
-                  </Text>
-                  <Text style={[styles.searchItemText, { color: theme.text }]}>{m.originalText}</Text>
-                  {m.translatedText && (
-                    <Text style={styles.searchItemSub}>{m.translatedText}</Text>
-                  )}
-                </View>
-              ))}
+          <TouchableOpacity
+            style={[styles.voicePlayerBar, isPlayingAudio && styles.voicePlayerBarActive]}
+            onPress={handlePlayVoiceIntro}
+            activeOpacity={0.85}
+          >
+            <View style={styles.voicePlayBtn}>
+              <FontAwesome name={isPlayingAudio ? 'pause' : 'play'} size={14} color="#FFFFFF" />
             </View>
+
+            <View style={styles.voiceWaveformArea}>
+              <Text style={styles.voiceTitleText}>
+                {isPlayingAudio ? 'Playing Greeting...' : `Voice Note (${partnerUser?.voiceDuration || '0:05'})`}
+              </Text>
+              <View style={styles.waveformBarsRow}>
+                {[14, 22, 10, 26, 18, 28, 12, 24, 16, 20, 12, 18, 24, 14, 8].map((h, idx) => (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.waveBar,
+                      {
+                        height: isPlayingAudio ? (h * (0.6 + Math.random() * 0.7)) : (h * 0.6),
+                        backgroundColor: isPlayingAudio ? '#C026D3' : '#E5E7EB',
+                      }
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          {!!partnerUser?.voiceIntroText && (
+            <Text style={styles.voiceIntroQuote}>"{partnerUser.voiceIntroText}"</Text>
           )}
         </View>
 
-        {/* Translation Settings Section */}
-        <View style={[styles.sectionCard, cardStyle]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>🌐 AI Translation Settings</Text>
-          <TouchableOpacity style={styles.settingRow} onPress={onOpenLangPicker}>
-            <View style={styles.settingLeft}>
-              <View style={styles.iconSquare}>
-                <FontAwesome name="language" size={16} color="#38BDF8" />
-              </View>
-              <View>
-                <Text style={[styles.settingLabel, { color: theme.subtext }]}>Target Translation Language</Text>
-                <Text style={[styles.settingValue, { color: theme.text }]}>{getLangName(targetLang)}</Text>
-              </View>
-            </View>
-            <FontAwesome name="chevron-right" size={14} color={theme.subtext} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Shared Media & Files History Gallery */}
-        <View style={[styles.sectionCard, cardStyle]}>
+        {/* 3. Language DNA Exchange Box */}
+        <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>🖼️ Shared Photos & Files ({sharedMedia.length})</Text>
+            <FontAwesome name="globe" size={14} color="#7C3AED" style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>LANGUAGE DNA</Text>
           </View>
 
-          {sharedMedia.length === 0 ? (
-            <Text style={[styles.emptyMediaText, { color: theme.subtext }]}>No shared photos or documents in this chat yet.</Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaGalleryRow}>
+          <View style={styles.langExchangeBox}>
+            <View style={styles.langRow}>
+              <View style={styles.langLeft}>
+                <Text style={styles.langFlag}>{nativeDetails.flag}</Text>
+                <View>
+                  <Text style={styles.langLabel}>NATIVE LANGUAGE</Text>
+                  <Text style={styles.langValue}>{nativeDetails.name}</Text>
+                </View>
+              </View>
+              <View style={styles.nativePill}>
+                <Text style={styles.nativePillText}>NATIVE</Text>
+              </View>
+            </View>
+
+            <View style={styles.langDivider} />
+
+            <View style={styles.langRow}>
+              <View style={styles.langLeft}>
+                <Text style={styles.langFlag}>{learningDetails.flag}</Text>
+                <View>
+                  <Text style={styles.langLabel}>CURRENTLY LEARNING</Text>
+                  <Text style={styles.langValue}>{learningDetails.name}</Text>
+                </View>
+              </View>
+              <View style={styles.learningPill}>
+                <Text style={styles.learningPillText}>{learningLevel}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* 4. About & Learning Goal */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <FontAwesome name="user" size={14} color="#4B1A56" style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>ABOUT & LEARNING GOAL</Text>
+          </View>
+          <Text style={styles.bioText}>{bio}</Text>
+        </View>
+
+        {/* 5. Conversation Topics / Interests */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <FontAwesome name="tags" size={14} color="#D97706" style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>CONVERSATION TOPICS</Text>
+          </View>
+          <View style={styles.interestWrap}>
+            {interests.map((tag, idx) => (
+              <View key={idx} style={styles.interestPill}>
+                <Text style={styles.interestText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* 6. Shared Media Gallery in this chat */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <FontAwesome name="photo" size={14} color="#2563EB" style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>SHARED MEDIA ({sharedMedia.length})</Text>
+          </View>
+
+          {sharedMedia.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaRow}>
               {sharedMedia.map((m, idx) => (
-                <TouchableOpacity
-                  key={m.id || idx}
-                  style={[styles.mediaItemCard, { backgroundColor: isDark ? '#0B0F19' : '#F1F5F9', borderColor: theme.border }]}
-                  onPress={() => m.imageUri && onViewImage && onViewImage(m.imageUri)}
-                >
-                  {m.imageUri ? (
-                    <Image source={{ uri: m.imageUri }} style={styles.mediaImage} />
-                  ) : (
-                    <View style={styles.docFileSquare}>
-                      <FontAwesome name="file-text" size={24} color="#38BDF8" />
-                      <Text style={[styles.docFileName, { color: theme.subtext }]} numberOfLines={1}>
-                        {m.originalText.replace('📄 Document: ', '')}
-                      </Text>
-                    </View>
-                  )}
+                <TouchableOpacity key={idx} onPress={() => onViewImage && onViewImage(m.imageUri)} activeOpacity={0.8}>
+                  <Image source={{ uri: m.imageUri }} style={styles.sharedImgThumb} />
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          ) : (
+            <Text style={styles.noMediaText}>No shared photos yet in this conversation.</Text>
           )}
-
-          {/* Shared Voice Notes Count */}
-          <View style={[styles.voiceNoteCountRow, { borderTopColor: theme.border }]}>
-            <FontAwesome name="microphone" size={14} color="#F59E0B" style={{ marginRight: 8 }} />
-            <Text style={styles.voiceNoteCountText}>
-              {sharedVoiceNotes.length} Voice Note{sharedVoiceNotes.length === 1 ? '' : 's'} recorded
-            </Text>
-          </View>
         </View>
 
-        {/* Danger Zone: Clear Chat History */}
-        <View style={[styles.sectionCard, cardStyle]}>
-          <TouchableOpacity style={styles.clearHistoryBtn} onPress={handleConfirmClear}>
-            <FontAwesome name="trash-o" size={18} color="#EF4444" style={{ marginRight: 10 }} />
-            <Text style={styles.clearHistoryText}>Clear Chat History</Text>
+        {/* 7. Danger Zone / Clear History */}
+        <View style={styles.dangerCard}>
+          <TouchableOpacity style={styles.clearHistoryBtn} onPress={handleConfirmClear} activeOpacity={0.8}>
+            <FontAwesome name="trash" size={16} color="#DC2626" style={{ marginRight: 8 }} />
+            <Text style={styles.clearHistoryText}>Clear Conversation History</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -234,227 +367,360 @@ export default function FriendProfileScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FAF5FA',
   },
+
+  // Header
   headerBar: {
-    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
+    borderBottomColor: '#F3E8FF',
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FAF5FA',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#320034',
+    letterSpacing: -0.3,
   },
-  scrollContent: {
-    padding: 16,
-    gap: 16,
-  },
-  heroSection: {
-    alignItems: 'center',
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-  },
-  avatarCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  headerActionBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FAF5FA',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+  },
+
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    gap: 12,
+  },
+
+  // 1. Hero Showcase Card
+  heroCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    padding: 22,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+    shadowColor: '#4B1A56',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  avatarShowcaseWrapper: {
     position: 'relative',
     marginBottom: 12,
-    borderWidth: 2,
   },
-  onlineStatusBadge: {
+  heroAvatarImg: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 3.5,
+    borderColor: '#4B1A56',
+  },
+  previewBadgeCircle: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#10B981',
-    borderWidth: 3,
+    top: 2,
+    right: 2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#4B1A56',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
-  friendName: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  friendEmail: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  statusSubText: {
-    color: '#10B981',
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 6,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: 18,
-  },
-  callActionBtn: {
+  onlineBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: -4,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    gap: 4,
+    borderWidth: 1.5,
+    borderColor: '#F3E8FF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  callActionText: {
-    color: '#38BDF8',
-    fontSize: 13,
+  onlineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#10B981',
+  },
+  onlineText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#047857',
+  },
+  heroNameText: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#320034',
+    letterSpacing: -0.4,
+  },
+  heroHandleText: {
+    fontSize: 13.5,
     fontWeight: '700',
-    marginLeft: 8,
+    color: '#EC4899',
+    marginTop: 2,
   },
+  heroEmailText: {
+    fontSize: 12,
+    color: '#80737d',
+    marginTop: 2,
+  },
+  quickActionDock: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3E8FF',
+    width: '100%',
+  },
+  dockActionBtn: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  dockIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+  },
+  dockLabel: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#4B1A56',
+  },
+
+  // Generic Section Card
   sectionCard: {
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
     padding: 16,
     borderWidth: 1,
+    borderColor: '#F3E8FF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
     marginBottom: 10,
   },
-  searchBarContainer: {
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#80737d',
+    letterSpacing: 0.8,
+  },
+
+  // 2. Voice Player
+  voicePlayerBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 42,
+    backgroundColor: '#FAF5FA',
+    borderRadius: 18,
+    padding: 12,
     borderWidth: 1,
+    borderColor: '#F3E8FF',
+    gap: 12,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
+  voicePlayerBarActive: {
+    borderColor: '#EC4899',
+    backgroundColor: '#FFF0FA',
   },
-  searchResultsContainer: {
-    marginTop: 12,
-  },
-  searchCountText: {
-    color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  searchItemCard: {
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
-    borderWidth: 1,
-  },
-  searchItemSender: {
-    color: '#2563EB',
-    fontSize: 10,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  searchItemText: {
-    fontSize: 13,
-  },
-  searchItemSub: {
-    color: '#D97706',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  settingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconSquare: {
+  voicePlayBtn: {
     width: 38,
     height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderRadius: 19,
+    backgroundColor: '#4B1A56',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
-  settingLabel: {
-    fontSize: 11,
-    fontWeight: '600',
+  voiceWaveformArea: {
+    flex: 1,
+    gap: 4,
   },
-  settingValue: {
+  voiceTitleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4B1A56',
+  },
+  waveformBarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 28,
+  },
+  waveBar: {
+    width: 3.5,
+    borderRadius: 2,
+  },
+  voiceIntroQuote: {
+    fontSize: 12.5,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    marginTop: 10,
+    lineHeight: 18,
+  },
+
+  // 3. Language DNA
+  langExchangeBox: {
+    backgroundColor: '#FAF5FA',
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+  },
+  langRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  langLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  langFlag: {
+    fontSize: 22,
+  },
+  langLabel: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#80737d',
+    letterSpacing: 0.6,
+  },
+  langValue: {
     fontSize: 14,
     fontWeight: '700',
-    marginTop: 2,
+    color: '#1c1b1f',
   },
-  emptyMediaText: {
+  nativePill: {
+    backgroundColor: '#FFF0FA',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  nativePillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4B1A56',
+  },
+  learningPill: {
+    backgroundColor: '#F3E8FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  learningPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#7C3AED',
+  },
+  langDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 10,
+  },
+
+  // 4. Bio & Interests
+  bioText: {
+    fontSize: 13.5,
+    color: '#374151',
+    lineHeight: 19,
+  },
+  interestWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  interestPill: {
+    backgroundColor: '#FFF0FA',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+  },
+  interestText: {
     fontSize: 12,
+    fontWeight: '700',
+    color: '#4B1A56',
+  },
+
+  // Shared Media
+  mediaRow: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  sharedImgThumb: {
+    width: 68,
+    height: 68,
+    borderRadius: 14,
+  },
+  noMediaText: {
+    fontSize: 12.5,
+    color: '#80737d',
     fontStyle: 'italic',
   },
-  mediaGalleryRow: {
-    flexDirection: 'row',
-  },
-  mediaItemCard: {
-    width: 90,
-    height: 90,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginRight: 10,
+
+  // Danger Zone
+  dangerCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 20,
     borderWidth: 1,
-  },
-  mediaImage: {
-    width: '100%',
-    height: '100%',
-  },
-  docFileSquare: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 6,
-  },
-  docFileName: {
-    fontSize: 9,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  voiceNoteCountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-  },
-  voiceNoteCountText: {
-    color: '#F59E0B',
-    fontSize: 12,
-    fontWeight: '600',
+    borderColor: '#FEE2E2',
+    overflow: 'hidden',
   },
   clearHistoryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   clearHistoryText: {
-    color: '#EF4444',
-    fontSize: 15,
+    color: '#DC2626',
+    fontSize: 13.5,
     fontWeight: '700',
   },
 });

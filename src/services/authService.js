@@ -7,10 +7,13 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { storageService } from './storageService';
 
-const BACKEND_TUNNEL_URL = 'https://channels-possibilities-chamber-hidden.trycloudflare.com';
+const BACKEND_TUNNEL_URL = "";
 
 const getApiBaseUrl = () => {
-  return `${BACKEND_TUNNEL_URL}/api/auth`;
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    return window.location.origin + "/api/auth";
+  }
+  return "https://vivetalk.sayflash.id/api/auth";
 };
 
 class AuthService {
@@ -75,6 +78,21 @@ class AuthService {
     } catch (err) {
       console.warn('[AuthService] Auto-login error:', err);
       return null;
+    }
+  }
+
+  // Fetch all registered users from backend API
+  async getAllUsers() {
+    try {
+      const res = await fetch("https://vivetalk.sayflash.id/api/users");
+      if (res.ok) {
+        const users = await res.json();
+        return Array.isArray(users) ? users : [];
+      }
+      return [];
+    } catch (err) {
+      console.warn('[AuthService] Failed to fetch registered users:', err.message);
+      return [];
     }
   }
 
@@ -184,7 +202,26 @@ class AuthService {
 
   // Update User Session & Persist
   async updateUserSession(user) {
-    this.currentUser = user;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.user) {
+          this.currentUser = data.user;
+        } else {
+          this.currentUser = user;
+        }
+      } else {
+        this.currentUser = user;
+      }
+    } catch (err) {
+      console.warn('Backend update failed, falling back to local storage', err);
+      this.currentUser = user;
+    }
     await storageService.saveSession(this.currentUser, this.token, this.refreshToken);
     this.notify();
   }

@@ -2,6 +2,7 @@ import { Audio } from 'expo-av';
 import { Platform } from 'react-native';
 
 let recordingInstance = null;
+let currentSound = null;
 
 export const voiceService = {
   async startRecording() {
@@ -11,6 +12,13 @@ export const voiceService = {
           await recordingInstance.stopAndUnloadAsync();
         } catch (e) {}
         recordingInstance = null;
+      }
+      if (currentSound) {
+        try {
+          await currentSound.stopAsync();
+          await currentSound.unloadAsync();
+        } catch (e) {}
+        currentSound = null;
       }
 
       const permission = await Audio.requestPermissionsAsync();
@@ -44,7 +52,7 @@ export const voiceService = {
       if (recordingInstance) {
         await recordingInstance.stopAndUnloadAsync();
         recordingInstance = null;
-        console.log('Accidental short recording canceled');
+        console.log('Recording canceled');
       }
     } catch (e) {
       recordingInstance = null;
@@ -67,12 +75,24 @@ export const voiceService = {
         playsInSilentModeIOS: true,
       });
 
-      console.log('Recorded Audio URI successfully captured:', uri);
+      console.log('Recorded Audio URI captured:', uri);
       return uri;
     } catch (err) {
       console.log('Failed to stop audio recording:', err);
       recordingInstance = null;
       return null;
+    }
+  },
+
+  async stopPlayback() {
+    try {
+      if (currentSound) {
+        await currentSound.stopAsync();
+        await currentSound.unloadAsync();
+        currentSound = null;
+      }
+    } catch (e) {
+      currentSound = null;
     }
   },
 
@@ -83,7 +103,13 @@ export const voiceService = {
         return null;
       }
 
-      console.log('Attempting to play audio from URI:', uri);
+      if (currentSound) {
+        try {
+          await currentSound.stopAsync();
+          await currentSound.unloadAsync();
+        } catch (e) {}
+        currentSound = null;
+      }
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
@@ -112,14 +138,17 @@ export const voiceService = {
       sound.setOnPlaybackStatusUpdate(status => {
         if (status.didJustFinish) {
           sound.unloadAsync();
+          currentSound = null;
           if (onFinish) onFinish();
         }
       });
 
+      currentSound = sound;
       await sound.playAsync();
       return sound;
     } catch (err) {
       console.log('Failed to play recorded audio:', err);
+      if (onFinish) onFinish();
       return null;
     }
   }

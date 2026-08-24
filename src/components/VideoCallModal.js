@@ -6,7 +6,6 @@ import { Audio } from 'expo-av';
 import { startAudioStream, stopAudioStream, unlockAudioContext } from '../services/audioStreamService';
 import { sendRawSignal } from '../services/translationService';
 import { webrtcService } from '../services/webrtcService';
-import { trtcService } from '../services/trtcService';
 
 /**
  * Isolated Camera PIP component — memoized to prevent re-renders from timer state changes.
@@ -56,7 +55,7 @@ function CallTimer({ visible }) {
   const formatted = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
 
   return (
-    <Text style={styles.callStatus}>TRTC HD Video • {formatted}</Text>
+    <Text style={styles.callStatus}>🟢 Live HD Video • {formatted}</Text>
   );
 }
 
@@ -89,7 +88,6 @@ export default function VideoCallModal({
       setIsConnected(false);
       stopAudioStream();
       webrtcService.close();
-      trtcService.exitRoom();
       return;
     }
 
@@ -108,17 +106,7 @@ export default function VideoCallModal({
       shouldDuckAndroid: false,
     }).catch(err => console.log('Audio mode error:', err));
 
-    // Initialize Tencent TRTC Video Room (SDKAppID: 20045905)
-    if (userEmail) {
-      const roomNum = (userEmail + partnerEmail).split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 1000);
-      trtcService.enterRoom({
-        roomId: roomNum,
-        userId: userEmail,
-        isVideo: true,
-      }).catch(err => console.log('[VideoCall] TRTC room enter error:', err));
-    }
-
-    // Also attempt WebRTC P2P upgrade for video + instant audio
+    // Pure WebRTC P2P HD Video & Audio Engine
     webrtcService.startLocalMedia(true).then(() => {
       if (userEmail && partnerEmail) {
         webrtcService.initPeerConnection(userEmail, partnerEmail);
@@ -129,13 +117,12 @@ export default function VideoCallModal({
         }
       }
     }).catch((err) => {
-      console.log('[VideoCall] WebRTC not available, using HTTP streaming:', err.message);
+      console.log('[VideoCall] WebRTC initializing stream fallback:', err.message);
     });
 
     return () => {
       stopAudioStream();
       webrtcService.close();
-      trtcService.exitRoom();
     };
   }, [visible, userEmail, userName, partnerEmail]);
 

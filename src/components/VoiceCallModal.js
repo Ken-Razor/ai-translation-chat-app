@@ -4,7 +4,6 @@ import { FontAwesome } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { startAudioStream, stopAudioStream, unlockAudioContext, onAudioLevel, onCallLog } from '../services/audioStreamService';
 import { webrtcService } from '../services/webrtcService';
-import { trtcService } from '../services/trtcService';
 
 /**
  * Isolated call timer — updates itself without re-rendering the parent
@@ -29,7 +28,7 @@ const CallTimerDisplay = memo(function CallTimerDisplay({ visible }) {
 
   return (
     <Text style={styles.callStatus}>
-      🔴 TRTC Cloud Live • {formatted}
+      🟢 Live HD Audio • {formatted}
     </Text>
   );
 });
@@ -113,7 +112,6 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
       setIsConnected(false);
       stopAudioStream();
       webrtcService.close();
-      trtcService.exitRoom();
       return;
     }
 
@@ -129,17 +127,7 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
       playThroughEarpieceAndroid: true, // earpiece by default
     }).catch(err => console.log('Audio mode error:', err));
 
-    // Initialize Tencent TRTC Cloud Engine (SDKAppID: 20045905)
-    if (userEmail) {
-      const roomNum = (userEmail + partnerEmail).split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 1000);
-      trtcService.enterRoom({
-        roomId: roomNum,
-        userId: userEmail,
-        isVideo: false,
-      }).catch(err => console.log('[VoiceCall] TRTC room enter error:', err));
-    }
-
-    // Also attempt WebRTC P2P upgrade (instant latency if connection establishes)
+    // Pure WebRTC P2P Voice Engine with WebSocket Signaling
     webrtcService.startLocalMedia(false).then(() => {
       if (userEmail && partnerEmail) {
         webrtcService.initPeerConnection(userEmail, partnerEmail);
@@ -150,13 +138,12 @@ export default function VoiceCallModal({ visible, onClose, partnerName, userEmai
         }
       }
     }).catch((err) => {
-      console.log('[VoiceCall] WebRTC not available, using HTTP streaming:', err.message);
+      console.log('[VoiceCall] WebRTC initializing fallback audio stream:', err.message);
     });
 
     return () => {
       stopAudioStream();
       webrtcService.close();
-      trtcService.exitRoom();
     };
   }, [visible, userEmail, userName, partnerEmail]);
 

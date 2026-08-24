@@ -1,13 +1,13 @@
 /**
- * ViveTalk AI - Real-Time Neural Translation Engine & Tone-Accurate Pinyin
- * Pure 100% Live AI Translation Engine (No hardcoded dictionaries).
- * Powered by Google Gemini 1.5 Flash + Google Neural AI Live Engine.
+ * ViveTalk AI - Real-Time Neural Translation Engine, Tone Rewriter & Pinyin
+ * Powered by Google Gemini 1.5 Flash + Backend Google Neural AI Engine.
  */
+
+import { getApiBaseUrl } from './translationService';
 
 // Official Google Gemini API Endpoint
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
-// Pre-configured Gemini API Key storage
 let defaultGeminiKey = ''; 
 let userGeminiApiKey = defaultGeminiKey;
 
@@ -19,9 +19,36 @@ export function getGeminiApiKey() {
   return userGeminiApiKey;
 }
 
-// Comprehensive Chinese Pinyin & Tone Marks Dictionary (Only for Hanzi Phonetics)
+// Normalized language code mapping
+const NORM_LANG_MAP = {
+  'en': 'en', 'english': 'en',
+  'id': 'id', 'indonesian': 'id', 'bahasa': 'id',
+  'zh': 'zh-CN', 'chinese': 'zh-CN', 'mandarin': 'zh-CN', 'zh-cn': 'zh-CN', 'zh-tw': 'zh-TW',
+  'ja': 'ja', 'jp': 'ja', 'japanese': 'ja',
+  'es': 'es', 'spanish': 'es',
+  'fr': 'fr', 'french': 'fr',
+  'de': 'de', 'german': 'de',
+  'ko': 'ko', 'korean': 'ko',
+  'ar': 'ar', 'arabic': 'ar',
+  'it': 'it', 'italian': 'it',
+  'pt': 'pt', 'portuguese': 'pt',
+  'ru': 'ru', 'russian': 'ru',
+  'vi': 'vi', 'vietnamese': 'vi',
+  'th': 'th', 'thai': 'th'
+};
+
+export const normalizeLangCode = (code) => {
+  if (!code) return 'en';
+  const clean = String(code).toLowerCase().replace(/[^a-z0-9]/gi, ' ').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  for (const w of words) {
+    if (NORM_LANG_MAP[w]) return NORM_LANG_MAP[w];
+  }
+  return NORM_LANG_MAP[clean] || clean || 'en';
+};
+
+// Comprehensive Chinese Pinyin Dictionary
 const PINYIN_DICT = {
-  // Phrases & Multi-character words
   '你好': 'Nǐ hǎo',
   '谢谢': 'Xièxie',
   '不客气': 'Bú kèqi',
@@ -32,41 +59,18 @@ const PINYIN_DICT = {
   '没问题': 'Méi wèntí',
   '早安': 'Zǎo ān',
   '晚安': 'Wǎn ān',
-  '上海': 'Shànghǎi',
-  '北京': 'Běijīng',
   '中国': 'Zhōngguó',
-  '恭喜': 'Gōngxǐ',
   '加油': 'Jiāyóu',
   '对不起': 'Duìbuqǐ',
-
-  // Single Characters with Tone Marks
   '我': 'wǒ', '你': 'nǐ', '他': 'tā', '她': 'tā', '它': 'tā', '们': 'men',
   '好': 'hǎo', '是': 'shì', '不': 'bù', '在': 'zài', '有': 'yǒu', '这': 'zhè',
   '那': 'nà', '就': 'jiù', '要': 'yào', '去': 'qù', '来': 'lái', '到': 'dào',
   '会': 'huì', '能': 'néng', '想': 'xiǎng', '说': 'shuō', '看': 'kàn', '听': 'tīng',
   '写': 'xiě', '读': 'dú', '做': 'zuò', '吃': 'chī', '喝': 'hē', '玩': 'wán',
   '买': 'mǎi', '卖': 'mài', '给': 'gěi', '和': 'hé', '与': 'yǔ', '或': 'huò',
-  '也': 'yě', '还': 'hái', '又': 'yòu', '得': 'de', '的': 'de', '地': 'de',
-  '着': 'zhe', '过': 'guò', '了': 'le', '吗': 'ma', '呢': 'ne', '吧': 'ba',
-  '啊': 'a', '呀': 'ya', '更': 'gèng', '很': 'hěn', '太': 'tài', '最': 'zuì',
-  '真': 'zhēn', '全': 'quán', '都': 'dōu', '多': 'duō', '少': 'shǎo', '大': 'dà',
-  '小': 'xiǎo', '长': 'cháng', '短': 'duǎn', '高': 'gāo', '矮': 'ǎi', '重': 'zhòng',
-  '轻': 'qīng', '快': 'kuài', '慢': 'màn', '新': 'xīn', '旧': 'jiù', '远': 'yuǎn',
-  '近': 'jìn', '难': 'nán', '易': 'yì', '开': 'kāi', '关': 'guān', '问': 'wèn',
-  '答': 'dá', '知': 'zhī', '道': 'dào', '识': 'shí', '明': 'míng', '白': 'bái',
-  '理': 'lǐ', '解': 'jiě', '心': 'xīn', '意': 'yì', '爱': 'ài', '恨': 'hèn',
-  '情': 'qíng', '感': 'gǎn', '思': 'sī', '念': 'niàn', '家': 'jiā', '人': 'rén',
-  '父': 'fù', '母': 'mǔ', '爸': 'bà', '妈': 'mā', '哥': 'gē', '姐': 'jiě',
-  '弟': 'dì', '妹': 'mèi', '子': 'zǐ', '女': 'nǚ', '男': 'nán', '老': 'lǎo',
-  '师': 'shī', '生': 'shēng', '校': 'xiào', '班': 'bān', '书': 'shū', '笔': 'bǐ',
-  '课': 'kè', '话': 'huà', '文': 'wén', '字': 'zì', '图': 'tú', '画': 'huà',
-  '音': 'yīn', '乐': 'yuè', '歌': 'gē', '声': 'shēng', '视': 'shì', '影': 'yǐng',
-  '电': 'diàn', '脑': 'nǎo', '机': 'jī', '网': 'wǎng', '信': 'xìn', '息': 'xī'
+  '很': 'hěn', '太': 'tài', '最': 'zuì', '真': 'zhēn', '都': 'dōu', '多': 'duō'
 };
 
-/**
- * Generate accurate, tone-marked Pinyin for Chinese text
- */
 export function convertToPinyin(text) {
   if (!text) return '';
   const clean = text.trim();
@@ -108,7 +112,87 @@ export function convertToPinyin(text) {
 }
 
 /**
- * Perform 100% Real-Time Live AI Translation (Zero hardcoded dictionaries)
+ * AI Tone Rewriter - Transforms text into different tones
+ */
+export async function rewriteTextWithTone(text, tone = 'casual') {
+  if (!text || !text.trim()) return text;
+  const clean = text.trim();
+  const activeKey = userGeminiApiKey || defaultGeminiKey;
+
+  // 1. Same-Origin Backend Tone Rewriter
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/ai/tone-rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean, tone })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.rewritten) return data.rewritten;
+    }
+  } catch (e) {}
+
+  // 2. Google Gemini AI (if key configured)
+  if (activeKey && activeKey.startsWith('AIza')) {
+    try {
+      const prompt = `Rewrite the following chat message in a "${tone}" tone while preserving the core meaning. Return ONLY the rewritten message without any explanation or quotes: "${clean}"`;
+      const res = await fetch(`${GEMINI_API_URL}?key=${encodeURIComponent(activeKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7 }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const rewritten = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (rewritten && rewritten.length > 0) return rewritten;
+      }
+    } catch (e) {}
+  }
+
+  // 3. Conversational Tone Rewriter Fallback
+  const toneLower = (tone || 'casual').toLowerCase();
+  if (toneLower === 'formal' || toneLower === 'polite') {
+    let res = clean
+      .replace(/\b(hey|yo|hi|sup)\b/gi, 'Hello')
+      .replace(/\b(u)\b/gi, 'you')
+      .replace(/\b(ur)\b/gi, 'your')
+      .replace(/\b(r)\b/gi, 'are')
+      .replace(/\b(gonna)\b/gi, 'going to')
+      .replace(/\b(wanna)\b/gi, 'would like to')
+      .replace(/\b(thanks|thx)\b/gi, 'Thank you very much');
+    if (!/[.?!]$/.test(res)) res += '.';
+    return res;
+  }
+
+  if (toneLower === 'friendly') {
+    let res = clean
+      .replace(/\b(hello|greetings)\b/gi, 'Hey there')
+      .replace(/\b(thanks|thank you)\b/gi, 'Thanks so much! 😊');
+    if (!res.includes('😊') && !res.includes('✨') && !res.includes('👋')) {
+      res += ' 😊';
+    }
+    return res;
+  }
+
+  if (toneLower === 'business') {
+    return `Regarding our discussion: ${clean}`;
+  }
+
+  if (toneLower === 'slang') {
+    return clean
+      .replace(/\b(cool|great|awesome)\b/gi, 'lit 🔥')
+      .replace(/\b(friend|partner)\b/gi, 'bestie')
+      .replace(/\b(really|very)\b/gi, 'super');
+  }
+
+  return clean;
+}
+
+/**
+ * Perform 100% Real-Time Live AI Translation
  */
 export async function translateWithGemini(text, sourceLang = 'auto', targetLang = 'en', tone = 'casual') {
   if (!text) return { translatedText: '', pinyin: '', culturalNote: null };
@@ -117,21 +201,47 @@ export async function translateWithGemini(text, sourceLang = 'auto', targetLang 
   if (!cleanText) return { translatedText: '', pinyin: '', culturalNote: null };
 
   const isChineseInput = /[\u4e00-\u9fa5]/.test(cleanText);
-  const activeKey = userGeminiApiKey || defaultGeminiKey;
+  const targetCode = normalizeLangCode(targetLang);
 
-  // 1. Google Gemini 1.5 Live AI Model (if Gemini Key provided)
+  // 1. Same-Origin Backend Translation (Zero CORS, 100% Reliable & Fast)
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/chat/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: cleanText,
+        targetLang: targetCode,
+        tone: tone
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.translatedText) {
+        return {
+          translatedText: data.translatedText,
+          pinyin: (targetCode.startsWith('zh') || isChineseInput) ? (data.pinyin || convertToPinyin(data.translatedText)) : '',
+          culturalNote: data.culturalNote || null,
+          detectedLanguage: data.detectedSource || 'auto',
+          engine: 'ViveTalk AI Neural Server'
+        };
+      }
+    }
+  } catch (e) {}
+
+  // 2. Google Gemini 1.5 Live AI Model (if Gemini Key provided)
+  const activeKey = userGeminiApiKey || defaultGeminiKey;
   if (activeKey && activeKey.startsWith('AIza')) {
     try {
-      const prompt = `You are Google Gemini AI language engine.
-Translate: "${cleanText}"
+      const prompt = `You are Google Gemini AI translation engine for ViveTalk.
+Translate this message: "${cleanText}"
 Source Language: ${sourceLang}
-Target Language: ${targetLang}
+Target Language: ${targetCode}
 Tone: ${tone}
-Respond strictly in valid JSON:
+Respond strictly in valid JSON format:
 {
   "translatedText": "string",
-  "pinyin": "string (Pinyin with tone marks ONLY if target or source is Chinese, else empty)",
-  "culturalNote": "short 1-sentence cultural note or null"
+  "pinyin": "string (Pinyin with tone marks if target or source is Chinese, else empty)",
+  "culturalNote": "short 1-sentence cultural context note or null"
 }`;
 
       const res = await fetch(`${GEMINI_API_URL}?key=${encodeURIComponent(activeKey)}`, {
@@ -151,7 +261,7 @@ Respond strictly in valid JSON:
           if (parsed.translatedText) {
             return {
               translatedText: parsed.translatedText,
-              pinyin: targetLang === 'zh' || isChineseInput ? (parsed.pinyin || convertToPinyin(cleanText)) : '',
+              pinyin: targetCode.startsWith('zh') || isChineseInput ? (parsed.pinyin || convertToPinyin(cleanText)) : '',
               culturalNote: parsed.culturalNote || null,
               detectedLanguage: isChineseInput ? 'zh' : 'auto',
               engine: 'Google Gemini AI Live'
@@ -164,66 +274,7 @@ Respond strictly in valid JSON:
     }
   }
 
-  // 2. Google GTX Free Live AI Neural Engine (100% Real-Time Live AI - No Hardcoded Dictionaries)
-  try {
-    const langMap = {
-      'en': 'en',
-      'id': 'id',
-      'zh': 'zh-CN',
-      'es': 'es',
-      'jp': 'ja',
-      'fr': 'fr',
-      'de': 'de'
-    };
-    const tlCode = langMap[targetLang] || 'en';
-    const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tlCode}&dt=t&q=${encodeURIComponent(cleanText)}`;
-
-    const res = await fetch(gtxUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data[0] && Array.isArray(data[0])) {
-        const translatedParts = data[0].map(part => part[0]).filter(Boolean);
-        const liveTranslatedStr = translatedParts.join('');
-        const detectedSrc = data[2] || 'auto';
-
-        if (liveTranslatedStr && liveTranslatedStr.trim() !== '') {
-          return {
-            translatedText: liveTranslatedStr,
-            pinyin: (targetLang === 'zh' || isChineseInput) ? convertToPinyin(liveTranslatedStr) : '',
-            culturalNote: null,
-            detectedLanguage: detectedSrc,
-            engine: 'Google Neural AI Live Engine'
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Google GTX Live Translation warning:', err);
-  }
-
-  // 3. Secondary Live Neural AI Engine (MyMemory Live)
-  try {
-    const targetCode = targetLang === 'jp' ? 'ja' : (targetLang === 'zh' ? 'zh-CN' : targetLang);
-    const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=autodetect|${targetCode}`;
-    const res = await fetch(mmUrl);
-    if (res.ok) {
-      const data = await res.json();
-      const liveStr = data?.responseData?.translatedText;
-      if (liveStr && liveStr.trim() !== '' && !liveStr.includes('IS AN INVALID LANGUAGE PAIR')) {
-        return {
-          translatedText: liveStr,
-          pinyin: (targetLang === 'zh' || isChineseInput) ? convertToPinyin(liveStr) : '',
-          culturalNote: null,
-          detectedLanguage: 'auto',
-          engine: 'MyMemory Neural AI Engine'
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('MyMemory Live Translation warning:', err);
-  }
-
-  // Pure fallback: Return clean original text without any hardcoded dictionaries
+  // 3. Fallback
   return {
     translatedText: cleanText,
     pinyin: isChineseInput ? convertToPinyin(cleanText) : '',

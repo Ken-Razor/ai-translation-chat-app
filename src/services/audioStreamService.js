@@ -10,10 +10,11 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendRawSignal } from './translationService';
 
-const CHUNK_DURATION_MS = 650; // Optimized 650ms chunk interval for fast, stable mobile I/O
+const CHUNK_DURATION_MS = 650;
 let isStreaming = false;
 let playbackQueue = [];
 let isPlaying = false;
+let isAudioModeConfigured = false;
 
 // Web-specific refs
 let webMediaStream = null;
@@ -26,6 +27,18 @@ let mobileLoopTimer = null;
 
 let audioLevelListeners = new Set();
 let callLogListeners = new Set();
+
+export function unlockAudioContext() {
+  try {
+    if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    }
+  } catch (e) {}
+}
 
 export function onAudioLevel(callback) {
   audioLevelListeners.add(callback);
@@ -115,110 +128,76 @@ async function uriToBase64(uri) {
   }
 }
 
-/**
- * Unlock Web Browser Audio Autoplay Policy on user gesture
- */
-export function unlockAudioContext() {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        if (!window.__globalAudioCtx) {
-          window.__globalAudioCtx = new AudioCtx();
-        }
-        if (window.__globalAudioCtx.state === 'suspended') {
-          window.__globalAudioCtx.resume();
-        }
-      }
-      const silentAudio = new window.Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
-      silentAudio.play().catch(() => {});
-    } catch (e) {}
-  }
+export async function unlockWebAudio() {
+  if (Platform.OS !== 'web') return;
+  try {
+    const dummy = new window.Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==');
+    await dummy.play().catch(() => {});
+  } catch (e) {}
 }
 
-/**
- * Start streaming audio from microphone to partner
- */
+// ============================================================
+// START AUDIO STREAMING
+// ============================================================
+
 export async function startAudioStream(userEmail, userName, partnerEmail) {
   if (isStreaming) return;
   isStreaming = true;
-  unlockAudioContext();
-
-  console.log('[AudioStream] Started live audio stream on platform:', Platform.OS);
+  playbackQueue = [];
+  isPlaying = false;
+  console.log('[AudioStream] Starting stream to', partnerEmail);
 
   if (Platform.OS === 'web') {
-    startWebAudioStream(userEmail, userName, partnerEmail);
+    startWebStream(userEmail, userName, partnerEmail);
   } else {
-    startMobileAudioStream(userEmail, userName, partnerEmail);
+    startMobileStream(userEmail, userName, partnerEmail);
   }
 }
 
-// ============================================================
-// WEB BROWSER MICROPHONE STREAMER (Continuous MediaRecorder)
-// ============================================================
-
-async function startWebAudioStream(userEmail, userName, partnerEmail) {
+async function startWebStream(userEmail, userName, partnerEmail) {
   try {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
-      console.log('Web mediaDevices not supported');
-      isStreaming = false;
-      return;
-    }
-
-    webMediaStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        sampleRate: 22050,
-      }
+      },
+      video: false,
     });
+    webMediaStream = stream;
 
-    let mimeType = 'audio/webm';
-    if (typeof MediaRecorder !== 'undefined') {
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        mimeType = 'audio/webm;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4';
-      }
-    }
+    const mimeType = 'audio/webm;codecs=opus';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    webMediaRecorder = recorder;
 
-    // Use a SINGLE continuous MediaRecorder with timeslice for gapless chunks
-    webMediaRecorder = new MediaRecorder(webMediaStream, { mimeType });
-
-    webMediaRecorder.ondataavailable = (e) => {
-      if (!isStreaming) return;
-      if (e.data && e.data.size > 0) {
-        // Fire-and-forget: convert and send without blocking next chunk
+    recorder.ondataavailable = async (event) => {
+      if (event.data && event.data.size > 0 && isStreaming) {
         const reader = new FileReader();
         reader.onloadend = () => {
           const dataUrl = reader.result || '';
           const commaIdx = dataUrl.indexOf(',');
-          const base64Data = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : '';
-          if (base64Data && base64Data.length > 30) {
-            // Fire-and-forget send — don't await
-            sendRawSignal(userEmail, userName, partnerEmail, `[AUDIO_CHUNK:${base64Data}]`).catch(() => {});
+          const base64 = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : '';
+          if (base64 && base64.length > 30) {
+            sendRawSignal(
+              userEmail,
+              userName,
+              partnerEmail,
+              `[AUDIO_CHUNK:${base64}]`
+            ).catch(() => {});
           }
         };
-        reader.readAsDataURL(e.data);
+        reader.readAsDataURL(event.data);
       }
     };
 
-    // Start recording with timeslice — produces continuous ondataavailable events
-    // every CHUNK_DURATION_MS without gaps
-    webMediaRecorder.start(CHUNK_DURATION_MS);
-    console.log('[AudioStream Web] Continuous recording started with', CHUNK_DURATION_MS, 'ms timeslice');
+    recorder.start(CHUNK_DURATION_MS);
   } catch (err) {
-    console.log('Web microphone stream error:', err);
+    console.log('Web startAudioStream error:', err);
     isStreaming = false;
   }
 }
 
-// ============================================================
-// NATIVE MOBILE MICROPHONE STREAMER (Double-Buffered expo-av)
-// ============================================================
-
-async function startMobileAudioStream(userEmail, userName, partnerEmail) {
+async function startMobileStream(userEmail, userName, partnerEmail) {
   try {
     const permission = await Audio.requestPermissionsAsync();
     if (!permission.granted) {
@@ -234,6 +213,7 @@ async function startMobileAudioStream(userEmail, userName, partnerEmail) {
       shouldDuckAndroid: false,
       playThroughEarpieceAndroid: false,
     });
+    isAudioModeConfigured = true;
 
     // Start the double-buffered recording loop
     recordMobileLoop(userEmail, userName, partnerEmail);
@@ -243,31 +223,21 @@ async function startMobileAudioStream(userEmail, userName, partnerEmail) {
   }
 }
 
-/**
- * Double-buffered recording loop:
- * 1. Start recording chunk N
- * 2. After CHUNK_DURATION_MS, stop chunk N and IMMEDIATELY start chunk N+1
- * 3. Send chunk N data in the background (fire-and-forget)
- * 4. No gap between chunks because the next recording starts before the send completes
- */
 async function recordMobileLoop(userEmail, userName, partnerEmail) {
   if (!isStreaming) return;
 
   try {
-    // Create and start a new recording
     const recording = new Audio.Recording();
     await recording.prepareToRecordAsync(RECORDING_OPTIONS);
     await recording.startAsync();
     activeRecording = recording;
 
-    // Continuously sample microphone metering status every 100ms during recording
     const meterInterval = setInterval(async () => {
       if (activeRecording === recording) {
         try {
           const status = await recording.getStatusAsync();
           if (status && status.isRecording && typeof status.metering === 'number') {
             const db = status.metering;
-            // Background noise is typically below -55dB. Speech is -50dB to 0dB.
             if (db > -55) {
               const normLevel = Math.min(1.0, Math.max(0.15, (db + 55) / 45));
               notifyAudioLevel(normLevel);
@@ -284,22 +254,18 @@ async function recordMobileLoop(userEmail, userName, partnerEmail) {
       if (!isStreaming) return;
 
       try {
-        // Stop current recording
         await recording.stopAndUnloadAsync();
         const uri = recording.getURI();
         activeRecording = null;
 
-        // IMMEDIATELY start next recording before processing the current one
         if (isStreaming) {
           recordMobileLoop(userEmail, userName, partnerEmail);
         }
 
-        // Now process and send the completed chunk in background (fire-and-forget)
         if (uri) {
           const rawBase64 = await uriToBase64(uri);
           const cleanBase64 = rawBase64 ? rawBase64.replace(/[\r\n\s]/g, '') : '';
           if (cleanBase64 && cleanBase64.length > 30) {
-            // Don't await — fire and forget
             sendRawSignal(
               userEmail,
               userName,
@@ -331,15 +297,14 @@ async function recordMobileLoop(userEmail, userName, partnerEmail) {
 
 export async function stopAudioStream() {
   isStreaming = false;
+  isAudioModeConfigured = false;
   console.log('[AudioStream] Stopped');
 
-  // Clear mobile timer
   if (mobileLoopTimer) {
     clearTimeout(mobileLoopTimer);
     mobileLoopTimer = null;
   }
 
-  // Stop web MediaRecorder (single continuous instance)
   if (webMediaRecorder && webMediaRecorder.state !== 'inactive') {
     try {
       webMediaRecorder.stop();
@@ -347,7 +312,6 @@ export async function stopAudioStream() {
     webMediaRecorder = null;
   }
 
-  // Release web media stream tracks
   if (webMediaStream) {
     try {
       webMediaStream.getTracks().forEach(track => track.stop());
@@ -355,7 +319,6 @@ export async function stopAudioStream() {
     webMediaStream = null;
   }
 
-  // Stop active mobile recording
   if (activeRecording) {
     try {
       await activeRecording.stopAndUnloadAsync();
@@ -368,22 +331,15 @@ export async function stopAudioStream() {
 }
 
 // ============================================================
-// PLAYBACK ENGINE (Received Audio Chunks)
+// PLAYBACK ENGINE
 // ============================================================
 
-/**
- * Queue and play received audio chunk
- */
 export async function playAudioChunk(base64Data) {
   if (!base64Data) return;
-  logCallEvent(`📥 Received audio chunk packet (${base64Data.length} base64 chars)`);
   playbackQueue.push(base64Data);
   processPlaybackQueue();
 }
 
-/**
- * Sequential playback processor — plays chunks back-to-back without overlap
- */
 async function processPlaybackQueue() {
   if (isPlaying || playbackQueue.length === 0) return;
   isPlaying = true;
@@ -396,9 +352,7 @@ async function processPlaybackQueue() {
       } else {
         await playMobileChunk(chunk);
       }
-    } catch (err) {
-      logCallEvent(`❌ Audio chunk playback exception: ${err.message}`);
-    }
+    } catch (err) {}
   }
 
   isPlaying = false;
@@ -425,23 +379,19 @@ async function playWebChunk(chunk) {
           URL.revokeObjectURL(blobUrl);
           resolve();
         };
-        // Safety timeout
         setTimeout(() => {
           URL.revokeObjectURL(blobUrl);
           resolve();
         }, 1000);
       });
-      return; // Success — exit mime loop
-    } catch (e) {
-      // Try next MIME type
-    }
+      return;
+    } catch (e) {}
   }
 }
 
 async function playMobileChunk(chunk) {
   if (!chunk || chunk.length < 30) return;
 
-  // If queue has backed up, keep only the latest audio chunk to avoid native thread lag
   if (playbackQueue.length > 1) {
     playbackQueue = playbackQueue.slice(-1);
   }
@@ -449,28 +399,15 @@ async function playMobileChunk(chunk) {
   let tempFileUri = null;
   try {
     tempFileUri = `${FileSystem.cacheDirectory}audio_chunk_${Date.now()}.m4a`;
-    logCallEvent(`💾 Writing temp audio file (${chunk.length} bytes) to disk...`);
     await FileSystem.writeAsStringAsync(tempFileUri, chunk, {
       encoding: 'base64',
     });
 
-    logCallEvent('🔊 Configuring Audio Mode for Playback...');
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-      overrideOutputAudioPortIOS: Audio.OVERRIDE_SPEAKER_SPEAKER,
-    });
-
-    logCallEvent('▶️ Loading Audio.Sound.createAsync...');
     const { sound } = await Audio.Sound.createAsync(
       { uri: tempFileUri },
       { shouldPlay: true, volume: 1.0 }
     );
 
-    logCallEvent('✅ Audio sound playing! Waiting for finish...');
     await new Promise((resolve) => {
       let timeout = setTimeout(resolve, 750);
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -482,9 +419,7 @@ async function playMobileChunk(chunk) {
     });
 
     sound.unloadAsync().catch(() => {});
-    logCallEvent('🎉 Audio chunk playback completed cleanly!');
   } catch (e) {
-    logCallEvent(`❌ playMobileChunk Error: ${e.message || e}`);
   } finally {
     if (tempFileUri) {
       FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => {});

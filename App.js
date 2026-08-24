@@ -39,6 +39,9 @@ import ChatListScreen from './src/screens/ChatListScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import FriendProfileScreen from './src/screens/FriendProfileScreen';
 import TestCallScreen from './src/screens/TestCallScreen';
+import HomeScreen from './src/screens/HomeScreen';
+import MatchesScreen from './src/screens/MatchesScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 import BottomNavBar from './src/components/BottomNavBar';
 
 import { authService } from './src/services/authService';
@@ -51,7 +54,7 @@ import {
   markPeerMessagesRead,
   getApiBaseUrl
 } from './src/services/translationService';
-import { translateWithGemini } from './src/services/geminiService';
+import { translateWithGemini, rewriteTextWithTone } from './src/services/geminiService';
 import {
   initiateCall,
   acceptCall,
@@ -80,7 +83,7 @@ export default function App() {
   const [appStage, setAppStage] = useState('landing');
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthInitializing, setIsAuthInitializing] = useState(true);
-  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'contacts' | 'settings'
+  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'chats' | 'matches' | 'profile'
   const [activeView, setActiveView] = useState('chatList'); // 'chatList' | 'chatRoom'
   const [partnerEmail, setPartnerEmail] = useState('');
   const [messages, setMessages] = useState([]);
@@ -149,6 +152,7 @@ export default function App() {
         setAppStage('home');
       } else {
         isFirstCallPollRef.current = true;
+        setAppStage('landing');
       }
     });
 
@@ -159,10 +163,11 @@ export default function App() {
           setCurrentUser(user);
           setAppStage('home');
         } else {
-          setAppStage('login');
+          setAppStage('landing');
         }
       } catch (err) {
         console.warn('[App] Session init error:', err);
+        setAppStage('landing');
       } finally {
         setIsAuthInitializing(false);
       }
@@ -172,77 +177,204 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // ⚡ Live Real-Time WebSocket Connection (<20ms latency audio push)
+  // ⚡ Live Real-Time WebSocket Connection (<10ms push, 0 polling)
   useEffect(() => {
     if (!currentUser?.email) return;
 
     let ws = null;
     let isSubscribed = true;
+    let pingInterval = null;
 
-    try {
-      const baseUrl = getApiBaseUrl();
-      const wsBase = baseUrl.replace('/api', '/ws').replace('https://', 'wss://').replace('http://', 'ws://');
-      const wsUrl = `${wsBase}?email=${encodeURIComponent(currentUser.email)}`;
+    const connectWs = () => {
+      try {
+        const baseUrl = getApiBaseUrl();
+        const wsBase = baseUrl.replace('/api', '').replace('https://', 'wss://').replace('http://', 'ws://');
+        const wsUrl = `${wsBase}?email=${encodeURIComponent(currentUser.email)}`;
 
-      ws = new WebSocket(wsUrl);
+        ws = new WebSocket(wsUrl);
 
-      ws.onmessage = (e) => {
-        if (!isSubscribed) return;
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.data && msg.data.includes('[AUDIO_CHUNK:')) {
-            const startIdx = msg.data.indexOf('[AUDIO_CHUNK:') + '[AUDIO_CHUNK:'.length;
-            const endIdx = msg.data.lastIndexOf(']');
-            if (startIdx > 0 && endIdx > startIdx) {
-              const base64Data = msg.data.substring(startIdx, endIdx);
-              if (base64Data.length > 50) {
-                playAudioChunk(base64Data);
+        ws.onopen = () => {
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'ping' }));
+            }
+          }, 25000);
+        };
+
+        ws.onmessage = async (e) => {
+          if (!isSubscribed) return;
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'new_message' && data.message) {
+              const m = data.message;
+              const sender = (m.sender || m.senderEmail || '').toLowerCase();
+              const recipient = (m.recipient || m.recipientEmail || '').toLowerCase();
+              const currentEmail = currentUser.email.toLowerCase();
+              const activePartner = (partnerEmail || '').toLowerCase();
+              const origText = m.originalText || m.text || '';
+
+              // Global incoming call detection (runs on all screens!)
+              if (sender !== currentEmail && (origText.includes('[CALL_SIGNAL:') || origText.includes('[CALL_START:'))) {
+                const match = origText.match(/\[CALL_(?:SIGNAL|START):(voice|video):([^\]]+)\]/);
+                if (match) {
+                  const [, callType, callId] = match;
+                  webrtcService.isCalleeMode = true;
+                  activeCallIdRef.current = callId;
+                  setIncomingCallData({
+                    callId,
+                    callerEmail: m.senderEmail || sender,
+                    callerName: m.senderName || sender,
+                    callType: callType || 'voice',
+                  });
+                  startRingtoneLoop('incoming');
+                  if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
+                  incomingCallTimerRef.current = setTimeout(() => {
+                    stopRingtoneLoop();
+                    setIncomingCallData(null);
+                  }, 30000);
+                }
+              }
+
+              // Call accept signal
+              if (sender !== currentEmail && origText.includes('[CALL_ACCEPT:')) {
+                stopRingtoneLoop();
+                setIsCallConnected(true);
+                if (callRingingTimerRef.current) {
+                  clearTimeout(callRingingTimerRef.current);
+                  callRingingTimerRef.current = null;
+                }
+              }
+
+              // Call end/decline signal
+              if (sender !== currentEmail && (origText.includes('[CALL_DECLINE:') || origText.includes('[CALL_END:'))) {
+                stopRingtoneLoop();
+                stopAudioStream();
+                webrtcService.close();
+                setIsCallConnected(false);
+                setIncomingCallData(null);
+                setIsVoiceCallVisible(false);
+                setIsVideoCallVisible(false);
+                activeCallIdRef.current = null;
+                if (callRingingTimerRef.current) clearTimeout(callRingingTimerRef.current);
+                if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
+              }
+
+              // WebRTC SDP Offer
+              if (sender !== currentEmail && origText.includes('[WEBRTC_OFFER:')) {
+                const sdpStr = origText.substring(origText.indexOf('[WEBRTC_OFFER:') + '[WEBRTC_OFFER:'.length, origText.lastIndexOf(']'));
+                if (sdpStr) {
+                  webrtcService.handleOffer(sdpStr, currentUser.email, m.senderEmail || sender);
+                }
+              }
+
+              // WebRTC SDP Answer
+              if (sender !== currentEmail && origText.includes('[WEBRTC_ANSWER:')) {
+                const sdpStr = origText.substring(origText.indexOf('[WEBRTC_ANSWER:') + '[WEBRTC_ANSWER:'.length, origText.lastIndexOf(']'));
+                if (sdpStr) {
+                  webrtcService.handleAnswer(sdpStr);
+                }
+              }
+
+              // WebRTC ICE Candidate
+              if (sender !== currentEmail && origText.includes('[WEBRTC_ICE:')) {
+                const candStr = origText.substring(origText.indexOf('[WEBRTC_ICE:') + '[WEBRTC_ICE:'.length, origText.lastIndexOf(']'));
+                if (candStr) {
+                  webrtcService.handleCandidate(candStr);
+                }
+              }
+
+              const isSignal = origText.includes('[CALL_') ||
+                              origText.includes('[WEBRTC_') ||
+                              origText.includes('[AUDIO_CHUNK:') ||
+                              origText.includes('[VIDEO_FRAME:');
+
+              if (
+                !isSignal &&
+                activePartner &&
+                ((sender === currentEmail && recipient === activePartner) ||
+                 (sender === activePartner && recipient === currentEmail))
+              ) {
+                const isFriend = sender !== currentEmail;
+                const newMsgObj = {
+                  id: m.id || `msg_${Date.now()}`,
+                  sender: isFriend ? 'friend' : 'user',
+                  senderName: m.senderName || (isFriend ? partnerEmail : (currentUser.displayName || 'Me')),
+                  originalText: origText,
+                  translatedText: m.translatedText || origText,
+                  pinyin: m.pinyin || '',
+                  culturalNote: m.culturalNote || null,
+                  timestamp: m.timestamp || new Date().toISOString(),
+                  status: 'read',
+                  isVoiceNote: !!m.audioUri || origText.includes('Voice Note'),
+                  audioUri: m.audioUri || null,
+                  imageUri: m.imageUri || null,
+                  durationSecs: m.durationSecs || 3,
+                };
+
+                setMessages(prev => {
+                  if (prev.some(existing => existing.id === newMsgObj.id)) return prev;
+                  return [...prev, newMsgObj];
+                });
               }
             }
+          } catch (err) {}
+        };
+
+        ws.onclose = () => {
+          if (pingInterval) clearInterval(pingInterval);
+          if (isSubscribed) {
+            setTimeout(connectWs, 3000);
           }
-        } catch (err) {}
-      };
-    } catch (err) {}
+        };
+      } catch (err) {}
+    };
+
+    connectWs();
 
     return () => {
       isSubscribed = false;
+      if (pingInterval) clearInterval(pingInterval);
       if (ws) {
         try { ws.close(); } catch (e) {}
       }
     };
-  }, [currentUser?.email]);
+  }, [currentUser?.email, partnerEmail]);
 
   const [allUsers, setAllUsers] = useState([]);
   const userListCacheRef = useRef([]);
 
+  // Fetch users once on login/mount
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchUserList().then(freshUsers => {
+      if (freshUsers && freshUsers.length > 0) {
+        userListCacheRef.current = freshUsers;
+        setAllUsers(freshUsers);
+      }
+    }).catch(() => {});
+  }, [currentUser, activeTab]);
+
   // ============================================
-  // GLOBAL Call Signal Polling Engine (runs on ALL screens)
-  // Detects incoming calls even when user is on chat list, settings, etc.
+  // Call Signal Polling Engine (Global background check)
   // ============================================
   useEffect(() => {
     if (!currentUser) {
-      isFirstCallPollRef.current = true;
       return;
     }
 
     const pollCallSignals = async () => {
       try {
-        // ALWAYS fetch fresh user list so updated names & profile photos sync across all devices!
-        const freshUsers = await fetchUserList();
-        if (freshUsers && freshUsers.length > 0) {
-          userListCacheRef.current = freshUsers;
-          setAllUsers(freshUsers);
-        }
         const users = userListCacheRef.current;
         const otherUsers = users.filter(u => u.email.toLowerCase() !== currentUser.email.toLowerCase());
 
-        // Prune memory if set gets too large
         if (handledCallSignalsRef.current.size > 150) {
           handledCallSignalsRef.current.clear();
         }
 
         for (const otherUser of otherUsers) {
           const peerMsgs = await fetchPeerMessages(currentUser.email, otherUser.email);
+          if (!peerMsgs || peerMsgs.length === 0) continue;
           if (!peerMsgs || peerMsgs.length === 0) continue;
 
           // Filter to messages sent BY THE PARTNER to ensure we never miss incoming audio chunks
@@ -412,9 +544,7 @@ export default function App() {
     };
 
     pollCallSignals();
-    // Dynamic polling interval: 500ms during an active call, 2000ms when idle
-    const pollIntervalTime = (isVoiceCallVisible || isVideoCallVisible) ? 500 : 2000;
-    const callPollInterval = setInterval(pollCallSignals, pollIntervalTime);
+    const callPollInterval = setInterval(pollCallSignals, 1000);
     return () => clearInterval(callPollInterval);
   }, [currentUser, isVoiceCallVisible, isVideoCallVisible]);
 
@@ -449,6 +579,11 @@ export default function App() {
         const msgTime = new Date(m.timestamp).getTime();
         return !isSignal && (isNaN(msgTime) || msgTime > cutoff);
       });
+
+      if (chatOnlyMsgs.length === 0) {
+        setMessages([]);
+        return;
+      }
 
       const formatted = await Promise.all(
         chatOnlyMsgs.map(async m => {
@@ -593,8 +728,6 @@ export default function App() {
     };
 
     loadMessages();
-    const pollInterval = setInterval(loadMessages, 2500);
-    return () => clearInterval(pollInterval);
   }, [currentUser, activeView, partnerEmail, targetLang, selectedTone]);
 
   // Smart Auto-Scroll Effect: Only scroll to end if user is at bottom or initial load!
@@ -609,14 +742,50 @@ export default function App() {
     }
   }, [messages, currentUser, activeView]);
 
-  if (!currentUser) {
-    return <LoginScreen onLoginSuccess={user => setCurrentUser(user)} />;
-  }
+
 
   const handleSelectChat = (email) => {
     isInitialLoadRef.current = true;
     isAtBottomRef.current = true;
     setPartnerEmail(email);
+
+    // ⚡ Instant 0ms Preload from Local Storage before slide animation
+    if (currentUser?.email && email) {
+      storageService.getLocalChatMessages(currentUser.email, email).then(localMsgs => {
+        if (Array.isArray(localMsgs) && localMsgs.length > 0) {
+          setMessages(localMsgs);
+        }
+      });
+    }
+
+    // Dynamically set target translation language to partner's native or learning language
+    const partner = (allUsers || []).find(u => u.email && email && u.email.toLowerCase() === email.toLowerCase()) ||
+                    (userListCacheRef.current || []).find(u => u.email && email && u.email.toLowerCase() === email.toLowerCase());
+    if (partner) {
+      const rawLang = partner.nativeLanguage || partner.learningLanguage || 'en';
+      const clean = String(rawLang).toLowerCase().replace(/[^a-z0-9]/gi, ' ').trim();
+      const words = clean.split(/\s+/).filter(Boolean);
+      let matchedCode = 'en';
+      const map = {
+        'zh': 'zh', 'chinese': 'zh', 'mandarin': 'zh', 'zhongwen': 'zh',
+        'id': 'id', 'indonesian': 'id', 'indonesia': 'id', 'bahasa': 'id',
+        'ja': 'ja', 'jp': 'ja', 'japanese': 'ja', 'nihongo': 'ja',
+        'es': 'es', 'spanish': 'es',
+        'en': 'en', 'english': 'en',
+        'fr': 'fr', 'french': 'fr',
+        'de': 'de', 'german': 'de',
+        'ko': 'ko', 'korean': 'ko',
+        'ar': 'ar', 'arabic': 'ar',
+        'it': 'it', 'italian': 'it',
+        'pt': 'pt', 'portuguese': 'pt',
+        'ru': 'ru', 'russian': 'ru',
+      };
+      for (const w of words) {
+        if (map[w]) { matchedCode = map[w]; break; }
+      }
+      setTargetLang(matchedCode);
+    }
+
     setActiveView('chatRoom');
     chatSlideAnim.setValue(0);
     Animated.timing(chatSlideAnim, {
@@ -624,7 +793,12 @@ export default function App() {
       duration: 260,
       easing: Easing.out(Easing.poly(4)),
       useNativeDriver: true,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished) {
+        flatListRef.current?.scrollToEnd({ animated: false });
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 80);
+      }
+    });
   };
 
   const handleBackToChatList = () => {
@@ -865,7 +1039,7 @@ export default function App() {
     }
   };
 
-  // Send Message with WhatsApp Status Ticks Progression
+  // Send Message with WhatsApp Status Ticks Progression (Zero-Delay Instant Dispatch)
   const handleSend = async (textToSend = null, options = {}) => {
     const text = textToSend || inputText;
     if (!text.trim() || !partnerEmail) return;
@@ -873,18 +1047,20 @@ export default function App() {
     setInputText('');
     isAtBottomRef.current = true;
 
+    const isVoiceOrImage = !!options.audioUri || !!options.imageUri || text.includes('[VOICE_DATA:') || text.includes('[IMAGE_DATA:') || text.includes('Voice Note');
+
     const tempId = `msg-${Date.now()}`;
     const initialMsg = {
       id: tempId,
       sender: 'user',
       senderName: currentUser.displayName || 'You',
       originalText: text,
-      translatedText: 'Translating with Gemini AI...',
+      translatedText: isVoiceOrImage ? '' : 'Translating...',
       pinyin: '',
       culturalNote: null,
       timestamp: new Date().toISOString(),
       status: 'pending',
-      isVoiceNote: options.isVoiceNote || text.includes('Voice Note'),
+      isVoiceNote: options.isVoiceNote || !!options.audioUri || text.includes('Voice Note'),
       audioUri: options.audioUri || null,
       imageUri: options.imageUri || null,
       durationSecs: options.durationSecs || 3,
@@ -894,47 +1070,66 @@ export default function App() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
 
     try {
-      const aiRes = await translateWithGemini(text, 'auto', targetLang, selectedTone);
-
       const sentMsg = await sendMessageToPeer(
         currentUser.email,
         currentUser.displayName || currentUser.email,
         partnerEmail,
         text,
         selectedTone,
-        targetLang
+        targetLang,
+        '',
+        '',
+        null
       );
 
-      if (options.audioUri) {
+      if (options.audioUri && sentMsg?.id) {
         localAudioCache.set(sentMsg.id, options.audioUri);
       }
-      if (options.imageUri) {
+      if (options.imageUri && sentMsg?.id) {
         localImageCache.set(sentMsg.id, options.imageUri);
       }
 
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === tempId
-            ? {
-                ...m,
-                id: sentMsg.id,
-                translatedText: (aiRes && aiRes.translatedText) || sentMsg.translatedText,
-                pinyin: (aiRes && aiRes.pinyin) || sentMsg.pinyin,
-                culturalNote: (aiRes && aiRes.culturalNote) || sentMsg.culturalNote,
-                status: sentMsg.status || 'sent',
-              }
-            : m
-        )
-      );
+      if (sentMsg) {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === tempId
+              ? {
+                  ...m,
+                  id: sentMsg.id,
+                  translatedText: sentMsg.translatedText || (isVoiceOrImage ? '' : text),
+                  pinyin: sentMsg.pinyin || '',
+                  culturalNote: sentMsg.culturalNote || null,
+                  status: 'sent',
+                }
+              : m
+          )
+        );
+      }
 
       setTimeout(() => {
-        setMessages(prev =>
-          prev.map(m => (m.id === sentMsg.id ? { ...m, status: 'read' } : m))
-        );
+        if (sentMsg?.id) {
+          setMessages(prev =>
+            prev.map(m => (m.id === sentMsg.id ? { ...m, status: 'read' } : m))
+          );
+        }
       }, 1200);
     } catch (err) {
       console.error('Failed to send peer message:', err);
     }
+  };
+
+  // AI Tone Rewriter Handler
+  const handleRewriteDraft = async (tone) => {
+    if (!inputText || !inputText.trim()) {
+      Alert.alert('AI Tone Rewriter', 'Please type a message in the input box first!');
+      return;
+    }
+    try {
+      const rewritten = await rewriteTextWithTone(inputText, tone);
+      if (rewritten) {
+        setInputText(rewritten);
+      }
+    } catch (e) {}
   };
 
   // Press-and-Hold Real Voice Recording Handlers
@@ -1016,11 +1211,17 @@ export default function App() {
     setVocabList(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
+    console.log('🔴 [App] handleLogout called — forcing appStage to landing NOW');
+    // Set state IMMEDIATELY (synchronous) so React renders LandingScreen
     setIsProfileVisible(false);
-    await authService.logout();
     setCurrentUser(null);
-    setAppStage('login');
+    setActiveTab('home');
+    setAppStage('landing');
+    // Then clean up auth session asynchronously (non-blocking)
+    authService.logout().then(() => {
+      console.log('🔴 [App] authService.logout completed');
+    }).catch(() => {});
   };
 
   const handleToggleTheme = () => {
@@ -1029,35 +1230,55 @@ export default function App() {
 
   const isInputEmpty = inputText.trim().length === 0;
 
-  // Step 1: Landing Page (First screen on app launch/restart & login transition)
-  if (appStage === 'landing' || isAuthInitializing) {
+  console.log('🟢 [App] RENDER — appStage:', appStage, '| currentUser:', currentUser?.email || 'NULL');
+
+  // Show loading splash while auth is initializing
+  if (isAuthInitializing) {
     return (
-      <LandingScreen
-        onFinishLoading={() => {
-          if (!isAuthInitializing) {
-            setAppStage(currentUser || authService.getCurrentUser() ? 'home' : 'login');
-          }
-        }}
-      />
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: '#f8f9fa' }]}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
+            <Text style={{ fontSize: 28, fontWeight: '900', color: '#320034' }}>ViveTalk</Text>
+            <Text style={{ fontSize: 13, color: '#4f434c', marginTop: 8 }}>Loading...</Text>
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Step 1: Landing Page (Onboarding screen shown on fresh launch when logged out or when user logs out)
+  if (appStage === 'landing') {
+    console.log('🟡 [App] Rendering LandingScreen (onboarding)');
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <LandingScreen
+          onFinishLoading={() => {
+            console.log('🟡 [App] LandingScreen onFinishLoading -> setting appStage to login');
+            setAppStage('login');
+          }}
+          onDirectSignIn={() => {
+            console.log('🟡 [App] LandingScreen onDirectSignIn -> setting appStage to login');
+            setAppStage('login');
+          }}
+        />
+      </SafeAreaProvider>
     );
   }
 
   // Step 2: Login Page (Shown when user is not authenticated)
   if (!currentUser || appStage === 'login') {
+    console.log('🔵 [App] Rendering LoginScreen');
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
-          <StatusBar
-            barStyle={activeTheme.mode === 'light' ? 'dark-content' : 'light-content'}
-            backgroundColor={activeTheme.bg}
-          />
-          <LoginScreen
-            onLoginSuccess={(user) => {
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <LoginScreen
+          onLoginSuccess={(user) => {
               setCurrentUser(user);
-              setAppStage('landing');
+              setAppStage('home');
             }}
+            onBackToLanding={() => setAppStage('landing')}
           />
-        </SafeAreaView>
       </SafeAreaProvider>
     );
   }
@@ -1071,7 +1292,7 @@ export default function App() {
   // Step 3: Home Page (Chat List / Chat Room after successful login)
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
+      <View style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
         <StatusBar
           barStyle={activeTheme.mode === 'light' ? 'dark-content' : 'light-content'}
           backgroundColor={activeTheme.bg}
@@ -1122,17 +1343,40 @@ export default function App() {
             theme={activeTheme}
           />
         ) : activeView === 'chatList' ? (
-          <ChatListScreen
-            activeTab={activeTab}
-            onSelectTab={setActiveTab}
-            currentUser={currentUser}
-            onSelectChat={handleSelectChat}
-            onOpenProfile={() => setIsProfileVisible(true)}
-            onOpenVocab={() => setIsVocabVisible(true)}
-            theme={activeTheme}
-            themePreference={themePreference}
-            onToggleTheme={handleToggleTheme}
-          />
+          activeTab === 'home' ? (
+            <HomeScreen
+              user={currentUser}
+              onNavigateToTab={setActiveTab}
+              onStartChatWithUser={partner => {
+                const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
+                handleSelectChat(email);
+              }}
+            />
+          ) : activeTab === 'matches' ? (
+            <MatchesScreen
+              onStartChatWithPartner={partner => {
+                const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
+                handleSelectChat(email);
+              }}
+            />
+          ) : activeTab === 'profile' ? (
+            <ProfileScreen
+              user={currentUser}
+              onLogout={handleLogout}
+            />
+          ) : (
+            <ChatListScreen
+              activeTab={activeTab}
+              onSelectTab={setActiveTab}
+              currentUser={currentUser}
+              onSelectChat={handleSelectChat}
+              onOpenProfile={() => setIsProfileVisible(true)}
+              onOpenVocab={() => setIsVocabVisible(true)}
+              theme={activeTheme}
+              themePreference={themePreference}
+              onToggleTheme={handleToggleTheme}
+            />
+          )
         ) : (
           <Animated.View
             style={[
@@ -1163,9 +1407,9 @@ export default function App() {
             />
 
             <KeyboardAvoidingView
-              style={[styles.keyboardContainer, { backgroundColor: activeTheme.bg }]}
+              style={[styles.keyboardContainer, { backgroundColor: '#FFFFFF' }]}
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
             >
               {/* Message Thread List */}
               <FlatList
@@ -1175,35 +1419,58 @@ export default function App() {
                 contentContainerStyle={styles.messageList}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
+                onContentSizeChange={() => {
+                  if (isInitialLoadRef.current) {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                  } else if (isAtBottomRef.current) {
+                    flatListRef.current?.scrollToEnd({ animated: true });
+                  }
+                }}
+                onLayout={() => {
+                  flatListRef.current?.scrollToEnd({ animated: false });
+                }}
+                ListHeaderComponent={
+                  <View style={styles.dateHeaderPill}>
+                    <Text style={styles.dateHeaderText}>Today, 10:24 AM</Text>
+                  </View>
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyChatBox}>
+                    <View style={styles.emptyChatIconCircle}>
+                      <FontAwesome name="comments-o" size={28} color="#4B1A56" />
+                    </View>
+                    <Text style={styles.emptyChatTitle}>Start a Conversation!</Text>
+                    <Text style={styles.emptyChatSub}>
+                      Say hello in your native language. Sayflash AI will translate your message in real-time.
+                    </Text>
+                  </View>
+                }
                 renderItem={({ item }) => (
                   <MessageBubble
                     message={item}
                     currentUser={currentUser}
                     partnerUser={allUsers.find(u => u.email && partnerEmail && u.email.toLowerCase() === partnerEmail.toLowerCase()) || userListCacheRef.current.find(u => u.email && partnerEmail && u.email.toLowerCase() === partnerEmail.toLowerCase())}
+                    targetLang={targetLang}
                     onSaveVocab={handleSaveVocab}
                     onViewImage={uri => setSelectedImageUri(uri)}
                     theme={activeTheme}
                   />
                 )}
-                ListEmptyComponent={
-                  <View style={styles.emptyState}>
-                    <Text style={[styles.emptyStateTitle, { color: activeTheme.text }]}>
-                      💬 Direct Chat with {partnerEmail}
-                    </Text>
-                    <Text style={[styles.emptyStateSub, { color: activeTheme.subtext }]}>
-                      Type your message below. Powered by Google Gemini AI Engine for instant translation & Pinyin!
-                    </Text>
-                  </View>
-                }
               />
 
               {/* AI Smart Replies Bar */}
-              <QuickReplies onSelectReply={replyText => handleSend(replyText)} theme={activeTheme} />
+              <QuickReplies
+                onSelectReply={replyText => {
+                  setInputText(replyText);
+                }}
+                theme={activeTheme}
+              />
 
               {/* AI Tone Rewriter Bar */}
               <TonePicker
                 selectedTone={selectedTone}
                 onSelectTone={setSelectedTone}
+                onRewriteDraft={handleRewriteDraft}
                 isVisible={true}
                 theme={activeTheme}
               />
@@ -1229,67 +1496,64 @@ export default function App() {
                 theme={activeTheme}
               />
 
-              {/* Dynamic Input Control Bar */}
-              <View style={[styles.inputArea, { backgroundColor: activeTheme.bg, borderTopColor: activeTheme.border }]}>
-                <View style={styles.inputRow}>
+              {/* Floating Capsule Input Toolbar from Reference Design */}
+              <View style={styles.floatingInputArea}>
+                <View style={styles.floatingInputRow}>
                   {/* Left Attachment (+) Button */}
                   <TouchableOpacity
                     style={[
-                      styles.plusBtn,
-                      { backgroundColor: activeTheme.card, borderColor: activeTheme.border },
-                      isMediaPickerVisible && styles.plusBtnActive
+                      styles.floatingPlusBtn,
+                      isMediaPickerVisible && styles.floatingPlusBtnActive
                     ]}
                     onPress={() => setIsMediaPickerVisible(prev => !prev)}
+                    activeOpacity={0.8}
                   >
                     <FontAwesome
                       name={isMediaPickerVisible ? "times" : "plus"}
                       size={18}
-                      color={isMediaPickerVisible ? "#38BDF8" : activeTheme.subtext}
+                      color="#111827"
                     />
                   </TouchableOpacity>
 
-                  {/* Text Input */}
-                  <View style={[styles.textInputContainer, { backgroundColor: activeTheme.card, borderColor: activeTheme.border }]}>
+                  {/* Center Capsule Container */}
+                  <View style={styles.floatingInputCapsule}>
                     <TextInput
-                      style={[styles.textInput, { color: activeTheme.text }]}
-                      placeholder={isRecordingVoice ? "Recording audio live..." : "Type message in English..."}
-                      placeholderTextColor={activeTheme.subtext}
+                      style={styles.floatingTextInput}
+                      placeholder={isRecordingVoice ? "Recording audio note..." : "Type a message to translate..."}
+                      placeholderTextColor="#80737d"
                       value={inputText}
                       onChangeText={setInputText}
-                      multiline={false}
-                      returnKeyType="send"
-                      onSubmitEditing={() => handleSend()}
+                      multiline={true}
+                      textAlignVertical="center"
                     />
-                  </View>
-
-                  {/* Dynamic Right Actions: Real Camera & Press-and-Hold Mic vs Send Paper Plane */}
-                  {isInputEmpty ? (
-                    <View style={styles.rightActionsRow}>
-                      {/* Real Camera Hardware Launcher */}
-                      <TouchableOpacity style={styles.inputActionBtn} onPress={handleLaunchRealCamera}>
-                        <FontAwesome name="camera" size={18} color={activeTheme.subtext} />
+                    <View style={styles.capsuleRightActions}>
+                      <TouchableOpacity style={styles.capsuleActionBtn} onPress={handleLaunchRealCamera} activeOpacity={0.7}>
+                        <FontAwesome name="camera" size={16} color="#80737d" />
                       </TouchableOpacity>
-
-                      {/* Press-and-Hold Mic Button */}
                       <TouchableOpacity
-                        style={[styles.inputActionBtn, isRecordingVoice && styles.micBtnActive]}
+                        style={[styles.capsuleActionBtn, isRecordingVoice && styles.micBtnActive]}
                         onPressIn={handleMicPressIn}
                         onPressOut={handleMicPressOut}
                         delayLongPress={100}
+                        activeOpacity={0.7}
                       >
                         <FontAwesome
                           name="microphone"
-                          size={18}
-                          color={isRecordingVoice ? "#EF4444" : activeTheme.subtext}
+                          size={17}
+                          color={isRecordingVoice ? "#EF4444" : "#80737d"}
                         />
                       </TouchableOpacity>
                     </View>
-                  ) : (
-                    /* Pure Paper Plane Icon Button (NO text word "Send") */
-                    <TouchableOpacity style={styles.sendIconButton} onPress={() => handleSend()}>
-                      <FontAwesome name="paper-plane" size={15} color="#FFFFFF" style={{ marginLeft: -2 }} />
-                    </TouchableOpacity>
-                  )}
+                  </View>
+
+                  {/* Right Floating Send Button in Deep Purple */}
+                  <TouchableOpacity
+                    style={styles.floatingSendBtn}
+                    onPress={() => handleSend()}
+                    activeOpacity={0.85}
+                  >
+                    <FontAwesome name="paper-plane" size={16} color="#FFFFFF" style={{ marginLeft: -2 }} />
+                  </TouchableOpacity>
                 </View>
               </View>
             </KeyboardAvoidingView>
@@ -1368,7 +1632,7 @@ export default function App() {
           user={currentUser}
           onLogout={handleLogout}
         />
-      </SafeAreaView>
+      </View>
     </SafeAreaProvider>
   );
 }
@@ -1427,62 +1691,146 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginLeft: 6,
   },
-  inputArea: {
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 16 : 10,
-    borderTopWidth: 1,
+  dateHeaderPill: {
+    alignSelf: 'center',
+    backgroundColor: '#E5E7EB', // Light grey pill from reference
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginVertical: 14,
   },
-  inputRow: {
+  dateHeaderText: {
+    color: '#4B5563',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emptyChatBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  emptyChatIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFF0FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyChatTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#320034',
+    marginBottom: 6,
+  },
+  emptyChatSub: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#F1F1F1',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginLeft: 16,
+    marginTop: 6,
+    marginBottom: 8,
+    gap: 5,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4B5563',
+    opacity: 0.6,
+  },
+  floatingInputArea: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F3E8FF',
+  },
+  floatingInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     gap: 8,
   },
-  plusBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  floatingPlusBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FAF5FA',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
+    borderColor: '#F3E8FF',
+    marginBottom: 2,
   },
-  plusBtnActive: {
-    backgroundColor: '#0F172A',
-    borderColor: '#38BDF8',
+  floatingPlusBtnActive: {
+    backgroundColor: '#FFF0FA',
+    borderColor: '#4B1A56',
   },
-  textInputContainer: {
+  floatingInputCapsule: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#FAF5FA',
     borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 4 : 2,
+    minHeight: 44,
+    maxHeight: 120,
     borderWidth: 1,
+    borderColor: '#F3E8FF',
   },
-  textInput: {
-    fontSize: 14,
-    height: 36,
+  floatingTextInput: {
+    flex: 1,
+    fontSize: 14.5,
+    color: '#320034',
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    paddingRight: 6,
+    maxHeight: 105,
+    lineHeight: 20,
   },
-  rightActionsRow: {
+  capsuleRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 2,
+    gap: 6,
+    paddingBottom: 7,
   },
-  inputActionBtn: {
-    width: 34,
-    height: 34,
+  capsuleActionBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
   micBtnActive: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    borderRadius: 17,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 15,
   },
-  sendIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#2563EB',
+  floatingSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#4B1A56',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 2,
+    shadowColor: '#4B1A56',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 3,
   },
 });

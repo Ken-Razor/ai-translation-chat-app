@@ -1,95 +1,106 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
-import { DARK_THEME } from '../theme/colors';
+
+const LANGUAGE_META = [
+  { id: 'zh', name: 'Chinese', flag: '🇨🇳', aliases: ['zh', 'chinese', 'mandarin', 'zhongwen', '中文', 'cmn'] },
+  { id: 'id', name: 'Indonesian', flag: '🇮🇩', aliases: ['id', 'indonesian', 'indonesia', 'bahasa', 'bahasaindonesia'] },
+  { id: 'en', name: 'English', flag: '🇺🇸', aliases: ['en', 'english', 'eng', 'us', 'uk'] },
+  { id: 'ja', name: 'Japanese', flag: '🇯🇵', aliases: ['ja', 'jp', 'japanese', 'nihongo', '日本語'] },
+  { id: 'ko', name: 'Korean', flag: '🇰🇷', aliases: ['ko', 'korean', 'hangul', '한국어'] },
+  { id: 'es', name: 'Spanish', flag: '🇪🇸', aliases: ['es', 'spanish', 'espanol', 'español'] },
+  { id: 'fr', name: 'French', flag: '🇫🇷', aliases: ['fr', 'french', 'francais', 'français'] },
+  { id: 'de', name: 'German', flag: '🇩🇪', aliases: ['de', 'german', 'deutsch'] },
+  { id: 'ar', name: 'Arabic', flag: '🇸🇦', aliases: ['ar', 'arabic', 'alarabiya', 'العربية'] },
+  { id: 'it', name: 'Italian', flag: '🇮🇹', aliases: ['it', 'italian', 'italiano'] },
+  { id: 'pt', name: 'Portuguese', flag: '🇵🇹', aliases: ['pt', 'portuguese', 'portugues', 'português'] },
+  { id: 'ru', name: 'Russian', flag: '🇷🇺', aliases: ['ru', 'russian', 'russkiy', 'русский'] },
+];
 
 export default function Header({
-  partnerName = "devicea@test.com",
-  partnerUser,
-  status = "Active now",
-  currentUser,
-  targetLang = "en",
+  targetLang = 'ja',
   onOpenLangPicker,
+  onOpenProfile,
+  onOpenFriendProfile,
+  currentUser,
+  partnerUser,
   onStartVoiceCall,
   onStartVideoCall,
-  onOpenFriendProfile,
-  onBackToChatList,
   onOpenTestCall,
-  theme = DARK_THEME
+  onBackToChatList,
+  onOpenChatOptions,
+  theme
 }) {
-  const displayTitle = partnerUser?.displayName || (partnerName.includes('@') ? partnerName.split('@')[0] : partnerName);
-  const initial = displayTitle ? displayTitle.charAt(0).toUpperCase() : 'D';
-  const avatarBg = partnerUser?.avatarColor || theme.primary;
+  const insets = useSafeAreaInsets();
+  const displayTitle = partnerUser?.displayName || partnerUser?.username || (partnerUser?.email ? partnerUser.email.split('@')[0] : 'Language Partner');
+  const rawAvatar = partnerUser?.avatar || partnerUser?.photoURL;
+  const avatarUrl = (rawAvatar && rawAvatar.startsWith('http'))
+    ? rawAvatar
+    : `https://ui-avatars.com/api/?name=${encodeURIComponent(displayTitle)}&background=4B1A56&color=ffffff&size=256`;
 
   const getLangLabel = (code) => {
-    switch (code) {
-      case 'id': return 'Indonesian';
-      case 'zh': return 'Chinese';
-      case 'es': return 'Spanish';
-      case 'jp': return 'Japanese';
-      case 'fr': return 'French';
-      case 'de': return 'German';
-      default: return 'English';
+    if (!code) return 'English 🇺🇸';
+    const clean = String(code).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff]/gi, ' ').trim();
+    const words = clean.split(/\s+/).filter(Boolean);
+
+    for (const item of LANGUAGE_META) {
+      if (item.aliases.includes(clean)) return `${item.name} ${item.flag}`;
+      for (const w of words) {
+        if (item.aliases.includes(w)) return `${item.name} ${item.flag}`;
+      }
     }
+    return `${code} 🌐`;
   };
 
-  const isDark = theme.mode === 'dark';
+  const topPadding = (insets.top > 0 ? insets.top : (Platform.OS === 'ios' ? 48 : 20)) + 6;
 
   return (
-    <View style={[styles.headerContainer, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-      {/* Left Section: Back Chevron + Clickable Avatar + Name -> Opens Friend Details */}
+    <View style={[styles.headerContainer, { paddingTop: topPadding }]}>
+      {/* Left Section: Back Button + Avatar + Name & Subtitle */}
       <View style={styles.leftSection}>
         {onBackToChatList && (
           <TouchableOpacity style={styles.backBtn} onPress={onBackToChatList} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <FontAwesome name="chevron-left" size={18} color={theme.subtext} />
+            <FontAwesome name="arrow-left" size={19} color="#111827" />
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={styles.profileClickArea} onPress={onOpenFriendProfile} activeOpacity={0.7}>
-          <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-            {partnerUser?.avatarUrl ? (
-              <Image source={{ uri: partnerUser.avatarUrl }} style={styles.avatarImage} />
+        <TouchableOpacity style={styles.profileClickArea} onPress={onOpenFriendProfile} activeOpacity={0.75}>
+          <View style={styles.avatarWrapper}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
             ) : (
-              <Text style={styles.avatarText}>{initial}</Text>
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarText}>{initial}</Text>
+              </View>
             )}
-            <View style={[styles.onlineDot, { borderColor: theme.headerBg }]} />
+            <View style={styles.onlineDot} />
           </View>
 
           <View style={styles.partnerInfo}>
-            <Text style={[styles.partnerName, { color: theme.text }]} numberOfLines={1}>
+            <Text style={styles.partnerName} numberOfLines={1}>
               {displayTitle}
             </Text>
-            <Text style={styles.statusText} numberOfLines={1}>
-              Active now
-            </Text>
+            <TouchableOpacity onPress={onOpenLangPicker} activeOpacity={0.7} style={styles.langSubRow}>
+              <Text style={styles.subtitleText} numberOfLines={1}>
+                Translating to: {getLangLabel(targetLang)}
+              </Text>
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </View>
 
-      {/* Right Section: Language Pill + Call Icons + Diagnostic Test Icon */}
+      {/* Right Section: Phone & Video Call Action Icons */}
       <View style={styles.rightSection}>
-        {/* Target Language Selector Pill */}
-        <TouchableOpacity style={styles.langPill} onPress={onOpenLangPicker}>
-          <FontAwesome name="language" size={13} color="#2DD4BF" style={{ marginRight: 5 }} />
-          <Text style={styles.langPillText}>→ {getLangLabel(targetLang)}</Text>
+        {/* Audio Call Icon */}
+        <TouchableOpacity style={styles.iconBtn} onPress={onStartVoiceCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+          <FontAwesome name="phone" size={20} color="#111827" />
         </TouchableOpacity>
 
-        {/* WhatsApp Phone Call Icon */}
-        <TouchableOpacity style={styles.iconBtn} onPress={onStartVoiceCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <FontAwesome name="phone" size={18} color="#38BDF8" />
+        {/* Video Call Icon */}
+        <TouchableOpacity style={styles.iconBtn} onPress={onStartVideoCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+          <FontAwesome name="video-camera" size={19} color="#111827" />
         </TouchableOpacity>
-
-        {/* WhatsApp Video Camera Icon */}
-        <TouchableOpacity style={styles.iconBtn} onPress={onStartVideoCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <FontAwesome name="video-camera" size={18} color="#38BDF8" />
-        </TouchableOpacity>
-
-        {/* Call Hardware Diagnostics Tool Button */}
-        {onOpenTestCall && (
-          <TouchableOpacity style={styles.iconBtn} onPress={onOpenTestCall} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <FontAwesome name="flask" size={18} color="#F59E0B" />
-          </TouchableOpacity>
-        )}
       </View>
     </View>
   );
@@ -100,16 +111,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    height: 60,
+    borderBottomColor: '#F3F4F6',
+    zIndex: 10,
   },
   leftSection: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    paddingRight: 6,
+    paddingRight: 8,
   },
   profileClickArea: {
     flexDirection: 'row',
@@ -117,74 +130,73 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backBtn: {
-    paddingRight: 10,
+    paddingRight: 14,
     paddingLeft: 2,
+    paddingVertical: 6,
   },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
+  avatarWrapper: {
     position: 'relative',
-    overflow: 'hidden',
+    marginRight: 12,
   },
   avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E5E7EB',
+  },
+  avatarFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#4B1A56',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   avatarText: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 16,
+    fontWeight: '700',
+    fontSize: 17,
   },
   onlineDot: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#10B981',
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: '#10B981', // Bright vibrant green dot from reference
     borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   partnerInfo: {
-    justifyContent: 'center',
     flex: 1,
+    justifyContent: 'center',
   },
   partnerName: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
+    color: '#111827',
+    letterSpacing: -0.3,
+    marginBottom: 2,
   },
-  statusText: {
-    color: '#10B981',
-    fontSize: 11,
+  langSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subtitleText: {
+    fontSize: 12.5,
+    color: '#6B7280',
+    fontWeight: '400',
   },
   rightSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  langPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(45, 212, 191, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(45, 212, 191, 0.3)',
-  },
-  langPillText: {
-    color: '#2DD4BF',
-    fontSize: 11,
-    fontWeight: '700',
+    gap: 16,
   },
   iconBtn: {
-    width: 32,
-    height: 32,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
   },

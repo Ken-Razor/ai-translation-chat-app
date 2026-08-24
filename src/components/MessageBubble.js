@@ -1,596 +1,410 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import * as Speech from 'expo-speech';
 import { FontAwesome } from '@expo/vector-icons';
+import * as Speech from 'expo-speech';
 import { voiceService } from '../services/voiceService';
-import { DARK_THEME } from '../theme/colors';
 
-// Global cache to lock each message's timestamp once formatted so it NEVER updates on polling
-const localTimestampCache = new Map();
-
-export const formatTimestamp = (ts, msgId) => {
-  if (msgId && localTimestampCache.has(msgId)) {
-    return localTimestampCache.get(msgId);
-  }
-
-  let formatted = '';
-  if (!ts) {
-    formatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } else if (typeof ts === 'number') {
-    const d = new Date(ts > 1e11 ? ts : ts * 1000);
-    formatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } else if (typeof ts === 'string') {
-    const num = Number(ts);
-    if (!isNaN(num) && num > 0) {
-      const d = new Date(num > 1e11 ? num : num * 1000);
-      formatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      const d = new Date(ts);
-      if (!isNaN(d.getTime())) {
-        formatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      } else {
-        formatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '10:24 AM';
+  try {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      let hours = d.getHours();
+      const minutes = d.getMinutes();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const minutesStr = minutes < 10 ? '0' + minutes : minutes;
+      return `${hours}:${minutesStr} ${ampm}`;
     }
-  } else {
-    formatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
+  } catch (e) {}
+  return '10:24 AM';
+};
 
-  if (msgId && formatted) {
-    localTimestampCache.set(msgId, formatted);
+const LANG_NAME_DICT = {
+  'zh': 'CHINESE', 'zh-cn': 'CHINESE', 'zh-tw': 'CHINESE', 'chinese': 'CHINESE', 'mandarin': 'CHINESE', 'zhongwen': 'CHINESE',
+  'id': 'INDONESIAN', 'indonesian': 'INDONESIAN', 'indonesia': 'INDONESIAN', 'bahasa': 'INDONESIAN',
+  'ja': 'JAPANESE', 'jp': 'JAPANESE', 'japanese': 'JAPANESE', 'nihongo': 'JAPANESE',
+  'en': 'ENGLISH', 'english': 'ENGLISH',
+  'es': 'SPANISH', 'spanish': 'SPANISH', 'espanol': 'SPANISH', 'español': 'SPANISH',
+  'fr': 'FRENCH', 'french': 'FRENCH', 'francais': 'FRENCH',
+  'de': 'GERMAN', 'german': 'GERMAN', 'deutsch': 'GERMAN',
+  'ko': 'KOREAN', 'korean': 'KOREAN', 'hangul': 'KOREAN',
+  'ar': 'ARABIC', 'arabic': 'ARABIC',
+  'it': 'ITALIAN', 'italian': 'ITALIAN',
+  'pt': 'PORTUGUESE', 'portuguese': 'PORTUGUESE',
+  'ru': 'RUSSIAN', 'russian': 'RUSSIAN',
+};
+
+const getLangName = (raw) => {
+  if (!raw) return 'TRANSLATION';
+  const clean = String(raw).toLowerCase().replace(/[^a-z0-9]/gi, ' ').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  for (const w of words) {
+    if (LANG_NAME_DICT[w]) return LANG_NAME_DICT[w];
   }
-  return formatted;
+  return clean.toUpperCase() || 'TRANSLATION';
 };
 
 export default function MessageBubble({
   message,
   currentUser,
   partnerUser,
+  targetLang = 'ja',
   onSaveVocab,
-  onTranscribeVoiceNote,
   onViewImage,
-  theme = DARK_THEME
+  theme
 }) {
-  const isUser = message.sender === 'user';
-  const isVoiceNote = message.isVoiceNote || (message.originalText && message.originalText.includes('Voice Note'));
+  const isUser = message.sender === 'user' || (currentUser && (message.sender === currentUser.email || message.senderEmail === currentUser.email));
+  const isVoiceNote = message.isVoiceNote || !!message.audioUri;
   const hasImage = !!message.imageUri;
-  const isDark = theme.mode === 'dark';
-
-  const senderDisplayName = isUser ? 'You' : (partnerUser?.displayName || message.senderName || 'Friend');
-
-  // Chinese detection rule: check if original text contains Chinese characters (\u4e00-\u9fa5)
-  const isOriginalChinese = /[\u4e00-\u9fa5]/.test(message.originalText || '');
-  const showFriendChineseGuides = !isUser && isOriginalChinese;
 
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [isTranscribed, setIsTranscribed] = useState(message.isTranscribed || false);
-  const [showHoldMenu, setShowHoldMenu] = useState(false);
-  const [soundObject, setSoundObject] = useState(null);
 
-  // WhatsApp-style Message Status Ticks (Pending 🕒, Sent ✓, Delivered ✓✓ gray, Read ✓✓ blue)
-  const renderStatusTicks = (status = 'read') => {
-    if (!isUser) return null;
-
-    if (status === 'pending') {
-      return <FontAwesome name="clock-o" size={11} color={theme.subtext} style={{ marginLeft: 4 }} />;
-    }
-    if (status === 'sent') {
-      return <FontAwesome name="check" size={11} color={theme.subtext} style={{ marginLeft: 4 }} />;
-    }
-    if (status === 'delivered') {
-      return (
-        <View style={styles.ticksRow}>
-          <FontAwesome name="check" size={11} color={theme.subtext} style={{ marginRight: -4 }} />
-          <FontAwesome name="check" size={11} color={theme.subtext} />
-        </View>
-      );
-    }
-    // 'read' (Blue Double Ticks)
-    return (
-      <View style={styles.ticksRow}>
-        <FontAwesome name="check" size={11} color="#38BDF8" style={{ marginRight: -4 }} />
-        <FontAwesome name="check" size={11} color="#38BDF8" />
-      </View>
-    );
-  };
-
-  const handlePlayVoiceNote = async () => {
-    if (!message.audioUri) return;
-    try {
-      if (isPlayingAudio) {
-        await voiceService.stopAudio();
-        setIsPlayingAudio(false);
-      } else {
-        setIsPlayingAudio(true);
-        await voiceService.playAudio(message.audioUri, () => {
-          setIsPlayingAudio(false);
-        });
-      }
-    } catch (e) {
-      console.warn("Audio playback error:", e);
-      setIsPlayingAudio(false);
-    }
-  };
-
-  const handleSpeakText = (textToSpeak) => {
+  const handlePlayVoice = async () => {
     if (isPlayingAudio) {
-      Speech.stop();
+      await voiceService.stopAudio();
       setIsPlayingAudio(false);
       return;
     }
 
-    setIsPlayingAudio(true);
+    if (message.audioUri) {
+      setIsPlayingAudio(true);
+      await voiceService.playAudio(message.audioUri, () => {
+        setIsPlayingAudio(false);
+      });
+    } else if (message.translatedText || message.originalText) {
+      setIsPlayingAudio(true);
+      Speech.speak(message.translatedText || message.originalText, {
+        language: message.targetLang || targetLang || 'en',
+        onDone: () => setIsPlayingAudio(false),
+        onError: () => setIsPlayingAudio(false),
+      });
+    }
+  };
+
+  const handleSpeakTranslation = (textToSpeak, lang) => {
+    if (!textToSpeak) return;
     Speech.speak(textToSpeak, {
-      language: isUser ? 'en-US' : 'zh-CN',
-      onDone: () => setIsPlayingAudio(false),
-      onError: () => setIsPlayingAudio(false),
+      language: lang || message.targetLang || targetLang || 'en',
     });
   };
 
-  const handleLongPress = () => {
-    if (isVoiceNote) {
-      setShowHoldMenu(true);
-    }
-  };
+  const hasTranslation = !!message.translatedText && message.translatedText !== message.originalText;
+  const formattedTime = formatTimestamp(message.timestamp);
 
-  const handlePerformTranscribe = () => {
-    setShowHoldMenu(false);
-    setIsTranscribed(true);
-    if (onTranscribeVoiceNote) {
-      onTranscribeVoiceNote(message.id);
-    }
-  };
+  // Labels for the translation boxes
+  const incomingTranslationLabel = `${getLangName(currentUser?.nativeLanguage || 'en')} TRANSLATION`;
+  const outgoingTranslationLabel = `${getLangName(message.targetLang || targetLang || 'ja')} TRANSLATION`;
+  const cleanOriginalText = (message.originalText || '')
+    .replace(/\[VOICE_DATA:[^\]]*\]?/gi, '')
+    .replace(/\[IMAGE_DATA:[^\]]*\]?/gi, '')
+    .replace(/\[CALL_[^\]]*\]?/gi, '')
+    .replace(/\[WEBRTC_[^\]]*\]?/gi, '')
+    .replace(/\[AUDIO_CHUNK:[^\]]*\]?/gi, '')
+    .replace(/\[VIDEO_FRAME:[^\]]*\]?/gi, '')
+    .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
+    .replace(/\(收到！\)/gi, '')
+    .trim();
 
-  const durationSecs = message.durationSecs || 3;
-  const formattedDuration = `0:${durationSecs < 10 ? '0' : ''}${durationSecs}`;
+  const isDefaultMediaPlaceholder = cleanOriginalText === '🎵 [Voice Note]' ||
+                                   cleanOriginalText === '[Voice Note]' ||
+                                   cleanOriginalText === '🎵 Voice Note' ||
+                                   cleanOriginalText === '📷 Photo Message' ||
+                                   cleanOriginalText === '🖼️ Gallery Photo' ||
+                                   cleanOriginalText === 'Photo Message' ||
+                                   cleanOriginalText === 'Gallery Photo';
 
-  const bubbleCardStyle = isUser
-    ? { backgroundColor: isDark ? '#1E293B' : '#E2E8F0', borderColor: isDark ? '#334155' : '#CBD5E1' }
-    : { backgroundColor: isDark ? '#131C2E' : '#FFFFFF', borderColor: isDark ? '#233048' : '#E2E8F0' };
+  const shouldShowText = !!cleanOriginalText && (!isVoiceNote && !hasImage ? true : !isDefaultMediaPlaceholder);
 
   return (
-    <View style={[styles.bubbleWrapper, isUser ? styles.userWrapper : styles.friendWrapper]}>
-      <TouchableOpacity
-        style={[styles.bubbleCard, bubbleCardStyle, isUser ? styles.userCard : styles.friendCard]}
-        onLongPress={handleLongPress}
-        activeOpacity={0.9}
+    <View style={[styles.clusterContainer, isUser ? styles.clusterUser : styles.clusterPartner]}>
+      {/* 1. Original Message Bubble */}
+      <View
+        style={[
+          styles.bubbleBase,
+          isUser ? styles.originalBubbleUser : styles.originalBubblePartner,
+          hasTranslation ? (isUser ? styles.originalUserAttached : styles.originalPartnerAttached) : null
+        ]}
       >
-        {/* Top Header: Sender Name Only (NO profile picture) */}
-        <View style={styles.headerLine}>
-          <Text style={[styles.senderName, isUser ? styles.userText : styles.friendText]}>
-            {senderDisplayName}
-          </Text>
-        </View>
-
-        {/* IMAGE / PHOTO MESSAGE BUBBLE */}
-        {hasImage ? (
-          <TouchableOpacity
-            style={styles.imageCardContainer}
-            onPress={() => {
-              if (onViewImage) onViewImage(message.imageUri);
-            }}
-            activeOpacity={0.85}
-          >
-            <Image source={{ uri: message.imageUri }} style={styles.chatImage} resizeMode="cover" />
-            <View style={styles.tapToViewBadge}>
-              <FontAwesome name="search-plus" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
-              <Text style={styles.tapToViewText}>Tap to View & Save</Text>
-            </View>
+        {/* Attached Photo/Media */}
+        {hasImage && (
+          <TouchableOpacity onPress={() => onViewImage && onViewImage(message.imageUri)} style={styles.imageWrapper} activeOpacity={0.9}>
+            <Image source={{ uri: message.imageUri }} style={styles.attachedImage} resizeMode="cover" />
           </TouchableOpacity>
-        ) : isVoiceNote ? (
-          /* VOICE NOTE UI BUBBLE */
-          <View style={styles.voiceNoteContainer}>
-            <View style={styles.voicePlayerRow}>
-              <TouchableOpacity
-                style={styles.playBtnCircle}
-                onPress={handlePlayVoiceNote}
-              >
-                <FontAwesome
-                  name={isPlayingAudio ? "pause" : "play"}
-                  size={14}
-                  color="#FFFFFF"
-                  style={!isPlayingAudio ? { marginLeft: 2 } : {}}
-                />
-              </TouchableOpacity>
-
-              {/* Animated Waveform Simulation */}
-              <View style={styles.waveformContainer}>
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 22 : 12 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 14 : 22 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 26 : 16 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 12 : 26 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 20 : 14 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 10 : 20 }]} />
-                <View style={[styles.waveBar, { height: isPlayingAudio ? 18 : 10 }]} />
-              </View>
-
-              {/* Real Dynamic Voice Note Duration */}
-              <Text style={[styles.durationText, { color: theme.subtext }]}>{formattedDuration}</Text>
-            </View>
-
-            {/* If Transcribed or Requested */}
-            {isTranscribed ? (
-              <View style={[styles.transcribedBox, { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.8)' : '#F1F5F9' }]}>
-                <Text style={styles.transcribedLabel}>📝 TRANSCRIBED SPEECH-TO-TEXT:</Text>
-                <Text style={[styles.transcribedText, { color: theme.text }]}>"Hello my friend, how are you doing today?"</Text>
-                <Text style={styles.translatedSubText}>"你好，我的朋友，你今天过得怎么样？"</Text>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.holdHintBtn} onPress={handlePerformTranscribe}>
-                <Text style={styles.holdHintText}>💡 Tap or Hold to Convert Voice to Text 📝</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
-          /* STANDARD TEXT MESSAGE BUBBLE */
-          <View>
-            <Text style={[styles.originalText, { color: theme.text }]}>{message.originalText}</Text>
-
-            {/* Gold Pinyin Box - ONLY SHOWN IF FRIEND TYPED IN CHINESE */}
-            {showFriendChineseGuides && message.pinyin && (
-              <View style={styles.pinyinContainer}>
-                <Text style={styles.pinyinLabel}>PINYIN:</Text>
-                <Text style={styles.pinyinText}>{message.pinyin}</Text>
-              </View>
-            )}
-
-            {/* Cyan AI Translation Card */}
-            {message.translatedText && (
-              <View style={styles.translationContainer}>
-                <View style={styles.translationHeader}>
-                  <Text style={styles.translationLabel}>AI TRANSLATION:</Text>
-                  <TouchableOpacity
-                    style={styles.speakButton}
-                    onPress={() => handleSpeakText(message.translatedText)}
-                  >
-                    <FontAwesome name="volume-up" size={12} color="#0284C7" style={{ marginRight: 4 }} />
-                    <Text style={styles.speakButtonText}>
-                      {isPlayingAudio ? 'Stop' : 'Hear'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={[styles.translatedText, { color: isDark ? '#E0F2FE' : '#0369A1' }]}>{message.translatedText}</Text>
-              </View>
-            )}
-
-            {/* Purple Cultural Context Card - ONLY SHOWN IF FRIEND TYPED IN CHINESE */}
-            {showFriendChineseGuides && message.culturalNote && (
-              <View style={styles.culturalContainer}>
-                <Text style={styles.culturalLabel}>💡 Cultural Context:</Text>
-                <Text style={[styles.culturalText, { color: isDark ? '#DDD6FE' : '#5B21B6' }]}>{message.culturalNote}</Text>
-              </View>
-            )}
-          </View>
         )}
 
-        {/* Save Vocab Action */}
-        {!isVoiceNote && !hasImage && (
-          <View style={styles.actionRow}>
+        {/* Voice Note Player */}
+        {isVoiceNote && (
+          <View style={styles.voiceNoteRow}>
             <TouchableOpacity
-              style={styles.saveVocabBtn}
-              onPress={() =>
-                onSaveVocab({
-                  original: message.originalText,
-                  pinyin: message.pinyin || '',
-                  translation: message.translatedText || '',
-                })
-              }
+              style={[styles.playBtn, { backgroundColor: isUser ? '#FFFFFF' : '#4B1A56' }]}
+              onPress={handlePlayVoice}
+              activeOpacity={0.8}
             >
-              <FontAwesome name="bookmark" size={11} color="#FBBF24" style={{ marginRight: 4 }} />
-              <Text style={styles.saveVocabText}>Save Phrase</Text>
+              <FontAwesome name={isPlayingAudio ? 'pause' : 'play'} size={12} color={isUser ? '#4B1A56' : '#FFFFFF'} />
             </TouchableOpacity>
+            <View style={styles.voiceWave}>
+              <View style={[styles.waveBar, { height: 8, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+              <View style={[styles.waveBar, { height: 16, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+              <View style={[styles.waveBar, { height: 22, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+              <View style={[styles.waveBar, { height: 14, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+              <View style={[styles.waveBar, { height: 18, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+              <View style={[styles.waveBar, { height: 10, backgroundColor: isUser ? '#E9D5FF' : '#4B1A56' }]} />
+            </View>
+            <Text style={[styles.voiceDuration, { color: isUser ? '#E9D5FF' : '#6B7280' }]}>
+              {message.audioDuration || '0:03'}
+            </Text>
           </View>
         )}
 
-        {/* BOTTOM FOOTER: Timestamp + Status Ticks */}
-        <View style={styles.footerRow}>
-          <Text style={[styles.timestamp, { color: theme.subtext }]}>{formatTimestamp(message.timestamp, message.id)}</Text>
-          {renderStatusTicks(message.status)}
-        </View>
-      </TouchableOpacity>
+        {/* Message Text */}
+        {shouldShowText && (
+          <Text style={[styles.messageText, isUser ? styles.textUser : styles.textPartner]}>
+            {cleanOriginalText}
+          </Text>
+        )}
 
-      {/* Long Press Action Popup Menu for Voice Note */}
-      {showHoldMenu && (
-        <View style={[styles.popupMenuCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Text style={[styles.popupTitle, { color: theme.subtext }]}>Voice Note Options</Text>
-          <TouchableOpacity style={styles.popupItem} onPress={handlePerformTranscribe}>
-            <FontAwesome name="file-text-o" size={14} color="#38BDF8" style={{ marginRight: 8 }} />
-            <Text style={[styles.popupItemText, { color: theme.text }]}>Convert Voice to Text (Transcribe)</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.popupItem} onPress={() => setShowHoldMenu(false)}>
-            <Text style={styles.popupCancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Optional Chinese Pinyin guide */}
+        {!!message.pinyin && (
+          <View style={styles.pinyinBox}>
+            <Text style={styles.pinyinText}>🗣️ {message.pinyin}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* 2. Embedded Real-Time Neural Translation Bubble */}
+      {hasTranslation && (
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => handleSpeakTranslation(message.translatedText, isUser ? (message.targetLang || targetLang) : 'en')}
+          style={[
+            styles.bubbleBase,
+            isUser ? styles.transBubbleUser : styles.transBubblePartner
+          ]}
+        >
+          {isUser ? (
+            /* Outgoing Translation (Right-Aligned style with icon on the right) */
+            <>
+              <View style={styles.transHeaderOutgoing}>
+                <Text style={styles.transLabelOutgoing}>{outgoingTranslationLabel}</Text>
+                <View style={styles.translateIconCircleOut}>
+                  <FontAwesome name="language" size={15} color="#4B1A56" />
+                </View>
+              </View>
+              <Text style={styles.transTextOutgoing}>{message.translatedText}</Text>
+            </>
+          ) : (
+            /* Incoming Translation (Left-Aligned style with icon on the left & pink border) */
+            <>
+              <View style={styles.transHeaderIncoming}>
+                <View style={styles.translateIconCircleIn}>
+                  <FontAwesome name="language" size={15} color="#A21CAF" />
+                </View>
+                <Text style={styles.transLabelIncoming}>{incomingTranslationLabel}</Text>
+              </View>
+              <Text style={styles.transTextIncoming}>{message.translatedText}</Text>
+            </>
+          )}
+        </TouchableOpacity>
       )}
+
+      {/* 3. Timestamp & Delivery Indicators Below Cluster */}
+      <View style={[styles.metaRow, isUser ? styles.metaRowUser : styles.metaRowPartner]}>
+        <Text style={styles.timestampText}>{formattedTime}</Text>
+        {isUser && (
+          <View style={styles.statusTicks}>
+            <FontAwesome name="check" size={11} color="#4B1A56" style={{ marginRight: -4 }} />
+            <FontAwesome name="check" size={11} color="#4B1A56" />
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bubbleWrapper: {
+  clusterContainer: {
     marginVertical: 6,
-    paddingHorizontal: 12,
-    flexDirection: 'column',
+    paddingHorizontal: 16,
+    maxWidth: '86%',
   },
-  userWrapper: {
+  clusterUser: {
+    alignSelf: 'flex-end',
     alignItems: 'flex-end',
   },
-  friendWrapper: {
+  clusterPartner: {
+    alignSelf: 'flex-start',
     alignItems: 'flex-start',
   },
-  bubbleCard: {
-    maxWidth: '85%',
-    borderRadius: 18,
-    padding: 12,
+  bubbleBase: {
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 22,
+  },
+
+  // --- 1. Original Bubbles ---
+  originalBubbleUser: {
+    backgroundColor: '#4B1A56', // Deep purple
+    borderBottomRightRadius: 6,
+  },
+  originalBubblePartner: {
+    backgroundColor: '#F1F1F1', // Light grey
+    borderBottomLeftRadius: 6,
+  },
+  originalUserAttached: {
+    marginBottom: 5,
+  },
+  originalPartnerAttached: {
+    marginBottom: 5,
+  },
+
+  // --- 2. Translation Bubbles ---
+  transBubbleUser: {
+    backgroundColor: '#F1F1F1', // Light grey fill
+    borderTopRightRadius: 6,
     borderWidth: 1,
-    elevation: 3,
+    borderColor: 'rgba(0, 0, 0, 0.06)',
   },
-  userCard: {
-    borderBottomRightRadius: 4,
+  transBubblePartner: {
+    backgroundColor: '#FFF9FE', // Soft pink/white tint
+    borderTopLeftRadius: 6,
+    borderWidth: 1.2,
+    borderColor: '#F9A8D4', // Magenta / Pink border
   },
-  friendCard: {
-    borderBottomLeftRadius: 4,
+
+  // --- Text Typography ---
+  messageText: {
+    fontSize: 15,
+    lineHeight: 22,
   },
-  headerLine: {
+  textUser: {
+    color: '#FFFFFF',
+    fontWeight: '400',
+  },
+  textPartner: {
+    color: '#111827',
+    fontWeight: '400',
+  },
+
+  // --- Translation Headers & Labels ---
+  transHeaderIncoming: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 6,
     gap: 6,
   },
-  bubbleAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+  translateIconCircleIn: {
+    marginRight: 2,
   },
-  bubbleAvatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 10,
-  },
-  bubbleAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  senderName: {
+  transLabelIncoming: {
     fontSize: 11,
     fontWeight: '700',
+    color: '#A21CAF', // Plum / Magenta
+    letterSpacing: 0.6,
   },
-  userText: {
-    color: '#2563EB',
+  transTextIncoming: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#111827',
+    fontWeight: '600',
   },
-  friendText: {
-    color: '#DB2777',
-  },
-  footerRow: {
+
+  transHeaderOutgoing: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginTop: 6,
+    marginBottom: 6,
+    gap: 6,
   },
-  ticksRow: {
+  translateIconCircleOut: {
+    marginLeft: 2,
+  },
+  transLabelOutgoing: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280', // Slate / Muted gray
+    letterSpacing: 0.6,
+  },
+  transTextOutgoing: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#111827',
+    fontWeight: '700',
+    textAlign: 'left',
+  },
+
+  // --- Metadata (Timestamp & Status) ---
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 4,
+  },
+  metaRowUser: {
+    justifyContent: 'flex-end',
+    marginRight: 4,
+  },
+  metaRowPartner: {
+    justifyContent: 'flex-start',
     marginLeft: 4,
   },
-  timestamp: {
-    fontSize: 10,
+  timestampText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#9CA3AF',
   },
-  imageCardContainer: {
-    borderRadius: 12,
+  statusTicks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 5,
+  },
+
+  // --- Media & Voice Notes ---
+  imageWrapper: {
+    borderRadius: 14,
     overflow: 'hidden',
-    marginTop: 4,
-    position: 'relative',
+    marginBottom: 8,
   },
-  chatImage: {
+  attachedImage: {
     width: 220,
-    height: 160,
-    borderRadius: 12,
+    height: 150,
+    borderRadius: 14,
   },
-  tapToViewBadge: {
-    position: 'absolute',
-    bottom: 6,
-    right: 6,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+  voiceNoteRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    marginVertical: 4,
   },
-  tapToViewText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  originalText: {
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  pinyinContainer: {
-    marginTop: 8,
-    backgroundColor: 'rgba(217, 119, 6, 0.15)',
-    borderRadius: 8,
-    padding: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#F59E0B',
-  },
-  pinyinLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#D97706',
-    marginBottom: 2,
-  },
-  pinyinText: {
-    fontSize: 13,
-    color: '#B45309',
-    fontWeight: '600',
-  },
-  translationContainer: {
-    marginTop: 8,
-    backgroundColor: 'rgba(14, 165, 233, 0.15)',
-    borderRadius: 8,
-    padding: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#0EA5E9',
-  },
-  translationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  translationLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#0284C7',
-  },
-  speakButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  speakButtonText: {
-    fontSize: 10,
-    color: '#0284C7',
-    fontWeight: '700',
-  },
-  translatedText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  culturalContainer: {
-    marginTop: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    borderRadius: 8,
-    padding: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#8B5CF6',
-  },
-  culturalLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#7C3AED',
-    marginBottom: 2,
-  },
-  culturalText: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  voiceNoteContainer: {
-    paddingVertical: 4,
-    minWidth: 200,
-  },
-  voicePlayerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  playBtnCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#2563EB',
+  playBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  waveformContainer: {
+  voiceWave: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    flex: 1,
-    height: 30,
   },
   waveBar: {
     width: 3,
-    backgroundColor: '#38BDF8',
-    borderRadius: 1.5,
+    borderRadius: 2,
   },
-  durationText: {
+  voiceDuration: {
     fontSize: 11,
     fontWeight: '600',
   },
-  transcribedBox: {
-    marginTop: 10,
-    borderRadius: 10,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  transcribedLabel: {
-    color: '#0284C7',
-    fontSize: 9,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  transcribedText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  translatedSubText: {
-    color: '#D97706',
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  holdHintBtn: {
-    marginTop: 8,
-    paddingVertical: 4,
-  },
-  holdHintText: {
-    color: '#2563EB',
-    fontSize: 11,
-    fontStyle: 'italic',
-  },
-  actionRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  saveVocabBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+  pinyinBox: {
+    backgroundColor: 'rgba(255, 215, 243, 0.5)',
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderRadius: 6,
+    marginTop: 5,
   },
-  saveVocabText: {
-    fontSize: 10,
-    color: '#D97706',
+  pinyinText: {
+    color: '#4B1A56',
+    fontSize: 11,
     fontWeight: '700',
-  },
-  popupMenuCard: {
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 6,
-    borderWidth: 1,
-    elevation: 5,
-  },
-  popupTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  popupItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  popupItemText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  popupCancelText: {
-    color: '#EF4444',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
   },
 });
