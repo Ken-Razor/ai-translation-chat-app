@@ -692,7 +692,7 @@ export default function SettingsScreen({
                 • <Text style={{ fontWeight: 'bold', color: theme.text }}>AI Model:</Text> Google Gemini 1.5 Flash{'\n'}
                 • <Text style={{ fontWeight: 'bold', color: theme.text }}>Framework:</Text> React Native & Expo Mobile{'\n'}
                 • <Text style={{ fontWeight: 'bold', color: theme.text }}>P2P Engine:</Text> WebRTC Real-Time Audio & Video{'\n'}
-                • <Text style={{ fontWeight: 'bold', color: theme.text }}>Real-Time Push:</Text> WebSocket (< 10ms Latency)
+                • <Text style={{ fontWeight: 'bold', color: theme.text }}>Real-Time Push:</Text> WebSocket (Under 10ms Latency)
               </Text>
             </View>
           </ScrollView>
