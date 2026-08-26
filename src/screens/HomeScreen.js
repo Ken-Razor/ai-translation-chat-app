@@ -58,12 +58,29 @@ const getFlagForLang = (raw) => {
   return '🌐';
 };
 
-export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser }) {
+export default function HomeScreen({ user, allUsers = [], onNavigateToTab, onStartChatWithUser }) {
   const insets = useSafeAreaInsets();
   const activeUser = user || authService.getCurrentUser();
   const myEmail = (activeUser?.email || '').toLowerCase();
-  const [registeredUsers, setRegisteredUsers] = useState(() => storageService.getSyncHomeUsers(myEmail));
+  
+  const [registeredUsers, setRegisteredUsers] = useState(() => {
+    if (Array.isArray(allUsers) && allUsers.length > 0) {
+      return allUsers.filter(u => u.email && u.email.toLowerCase() !== myEmail);
+    }
+    return storageService.getSyncHomeUsers(myEmail);
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Sync when allUsers prop updates
+  useEffect(() => {
+    if (Array.isArray(allUsers) && allUsers.length > 0) {
+      const others = allUsers.filter(u => u.email && u.email.toLowerCase() !== myEmail);
+      if (others.length > 0) {
+        setRegisteredUsers(others);
+        if (myEmail) storageService.saveHomeUsers(myEmail, others);
+      }
+    }
+  }, [allUsers, myEmail]);
 
   // 1. Instant 0ms Load from Local Storage Cache on Mount
   useEffect(() => {
@@ -77,9 +94,9 @@ export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser 
 
   const loadRegisteredUsers = useCallback(async () => {
     try {
-      const allUsers = await authService.getAllUsers();
-      if (Array.isArray(allUsers)) {
-        const others = allUsers.filter(u => u.email && u.email.toLowerCase() !== myEmail);
+      const users = await authService.getAllUsers();
+      if (Array.isArray(users) && users.length > 0) {
+        const others = users.filter(u => u.email && u.email.toLowerCase() !== myEmail);
         setRegisteredUsers(others);
         if (myEmail) {
           storageService.saveHomeUsers(myEmail, others);

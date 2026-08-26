@@ -10,9 +10,6 @@ import { translateWithGemini } from './geminiService';
 const BACKEND_TUNNEL_URL = "";
 
 export const getApiBaseUrl = () => {
-  if (typeof window !== "undefined" && window.location && window.location.origin) {
-    return window.location.origin + "/api";
-  }
   return "https://vivetalk.sayflash.id/api";
 };
 

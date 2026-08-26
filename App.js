@@ -630,8 +630,8 @@ export default function App() {
     chatSlideAnim.setValue(0);
     Animated.timing(chatSlideAnim, {
       toValue: 1,
-      duration: 320,
-      easing: Easing.bezier(0.16, 1, 0.3, 1),
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   };
@@ -639,8 +639,8 @@ export default function App() {
   const handleBackToChatList = () => {
     Animated.timing(chatSlideAnim, {
       toValue: 0,
-      duration: 300,
-      easing: Easing.bezier(0.16, 1, 0.3, 1),
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) {
@@ -1185,55 +1185,62 @@ export default function App() {
             onViewImage={uri => setSelectedImageUri(uri)}
             theme={activeTheme}
           />
-        ) : activeView === 'chatList' ? (
-          activeTab === 'home' ? (
-            <HomeScreen
-              user={currentUser}
-              onNavigateToTab={setActiveTab}
-              onStartChatWithUser={partner => {
-                const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
-                handleSelectChat(email);
-              }}
-            />
-          ) : activeTab === 'matches' ? (
-            <MatchesScreen
-              onStartChatWithPartner={partner => {
-                const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
-                handleSelectChat(email);
-              }}
-            />
-          ) : activeTab === 'profile' ? (
-            <ProfileScreen
-              user={currentUser}
-              onLogout={handleLogout}
-            />
-          ) : (
-            <ChatListScreen
-              activeTab={activeTab}
-              onSelectTab={setActiveTab}
-              currentUser={currentUser}
-              onSelectChat={handleSelectChat}
-              onOpenProfile={() => setIsProfileVisible(true)}
-              onOpenVocab={() => setIsVocabVisible(true)}
-              theme={activeTheme}
-              themePreference={themePreference}
-              onToggleTheme={handleToggleTheme}
-            />
-          )
         ) : (
-          <Animated.View
-            style={[
-              styles.chatRoomContainer,
-              {
-                backgroundColor: activeTheme.bg,
-                opacity: chatSlideAnim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.6, 1] }),
-                transform: [
-                  { translateX: chatSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [Dimensions.get('window').width || 360, 0] }) },
-                  { scale: chatSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }
-                ]
-              }
-            ]}
-          >
+          <View style={{ flex: 1 }}>
+            {activeTab === 'home' ? (
+              <HomeScreen
+                user={currentUser}
+                allUsers={allUsers}
+                onNavigateToTab={setActiveTab}
+                onStartChatWithUser={partner => {
+                  const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
+                  handleSelectChat(email);
+                }}
+              />
+            ) : activeTab === 'matches' ? (
+              <MatchesScreen
+                onStartChatWithPartner={partner => {
+                  const email = partner.email || (partner.displayName ? `${partner.displayName.toLowerCase().replace(/\s+/g, '')}@test.com` : 'elena.smith@test.com');
+                  handleSelectChat(email);
+                }}
+              />
+            ) : activeTab === 'profile' ? (
+              <ProfileScreen
+                user={currentUser}
+                onLogout={handleLogout}
+              />
+            ) : (
+              <ChatListScreen
+                activeTab={activeTab}
+                onSelectTab={setActiveTab}
+                currentUser={currentUser}
+                onSelectChat={handleSelectChat}
+                onOpenProfile={() => setIsProfileVisible(true)}
+                onOpenVocab={() => setIsVocabVisible(true)}
+                theme={activeTheme}
+                themePreference={themePreference}
+                onToggleTheme={handleToggleTheme}
+              />
+            )}
+
+            {/* Sliding Chat Room Layer (Smooth slide over tabs without blank screen gaps) */}
+            {activeView === 'chatRoom' && (
+              <Animated.View
+                style={[
+                  styles.chatRoomContainer,
+                  {
+                    backgroundColor: activeTheme.bg,
+                    transform: [
+                      {
+                        translateX: chatSlideAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [Dimensions.get('window').width || 360, 0]
+                        })
+                      }
+                    ]
+                  }
+                ]}
+              >
             <Header
               partnerName={partnerEmail || "devicea@test.com"}
               partnerUser={allUsers.find(u => u.email && partnerEmail && u.email.toLowerCase() === partnerEmail.toLowerCase()) || userListCacheRef.current.find(u => u.email && partnerEmail && u.email.toLowerCase() === partnerEmail.toLowerCase())}
@@ -1396,6 +1403,8 @@ export default function App() {
             </KeyboardAvoidingView>
           </Animated.View>
         )}
+          </View>
+        )}
         </Animated.View>
 
         {/* Bottom Navigation Bar for Mobile */}
@@ -1481,7 +1490,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chatRoomContainer: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
   },
   keyboardContainer: {
     flex: 1,
