@@ -1,44 +1,90 @@
 /**
- * ViveTalk Motion for React Animation Module
- * Powered by motion.dev (motion/react) for Web and smooth animated fallbacks for Native.
+ * ViveTalk Motion for React (Native / Mobile Target)
+ * Pure React Native implementation using Animated API for Expo Go, iOS, and Android.
+ * Has zero dependency on DOM or web-only packages to prevent Metro resolver errors.
  */
 
-import React from 'react';
-import { Platform, View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Image, Animated } from 'react-native';
 
-// On Web: dynamically import motion/react
-let motion = null;
-let AnimatePresence = ({ children }) => <>{children}</>;
-
-if (Platform.OS === 'web') {
-  try {
-    const MotionPkg = require('motion/react');
-    motion = MotionPkg.motion;
-    if (MotionPkg.AnimatePresence) {
-      AnimatePresence = MotionPkg.AnimatePresence;
-    }
-  } catch (err) {
-    console.warn('[Motion] motion/react load warning:', err);
-  }
-}
-
-// Fallback component for non-web or if motion failed to load
-const createFallback = (Comp) => {
-  return React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, ...props }, ref) => {
-    return (
-      <Comp ref={ref} style={style} {...props}>
-        {children}
-      </Comp>
-    );
-  });
+export const AnimatePresence = ({ children }) => <>{children}</>;
+export const motion = {
+  div: View,
+  span: Text,
+  button: TouchableOpacity,
+  img: Image,
 };
 
-export const MotionView = (Platform.OS === 'web' && motion?.div) ? motion.div : createFallback(View);
-export const MotionText = (Platform.OS === 'web' && motion?.span) ? motion.span : createFallback(Text);
-export const MotionButton = (Platform.OS === 'web' && motion?.button) ? motion.button : createFallback(TouchableOpacity);
-export const MotionImage = (Platform.OS === 'web' && motion?.img) ? motion.img : createFallback(Image);
+export const MotionView = React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, ...props }, ref) => {
+  const fadeAnim = useRef(new Animated.Value(initial?.opacity !== undefined ? initial.opacity : 1)).current;
+  const transY = useRef(new Animated.Value(initial?.y !== undefined ? initial.y : 0)).current;
+  const transX = useRef(new Animated.Value(initial?.x !== undefined ? initial.x : 0)).current;
+  const scaleAnim = useRef(new Animated.Value(initial?.scale !== undefined ? initial.scale : 1)).current;
 
-export { motion, AnimatePresence };
+  useEffect(() => {
+    if (animate) {
+      const anims = [];
+      if (animate.opacity !== undefined) {
+        anims.push(Animated.timing(fadeAnim, { toValue: animate.opacity, duration: 300, useNativeDriver: true }));
+      }
+      if (animate.y !== undefined && typeof animate.y === 'number') {
+        anims.push(Animated.spring(transY, { toValue: animate.y, friction: 8, useNativeDriver: true }));
+      }
+      if (animate.x !== undefined && typeof animate.x === 'number') {
+        anims.push(Animated.spring(transX, { toValue: animate.x, friction: 8, useNativeDriver: true }));
+      }
+      if (animate.scale !== undefined && typeof animate.scale === 'number') {
+        anims.push(Animated.spring(scaleAnim, { toValue: animate.scale, friction: 7, useNativeDriver: true }));
+      }
+      if (anims.length > 0) {
+        Animated.parallel(anims).start();
+      }
+    }
+  }, [animate]);
+
+  return (
+    <Animated.View
+      ref={ref}
+      style={[
+        style,
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: transY }, { translateX: transX }, { scale: scaleAnim }],
+        },
+      ]}
+      {...props}
+    >
+      {children}
+    </Animated.View>
+  );
+});
+
+export const MotionText = React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, ...props }, ref) => {
+  return (
+    <Text ref={ref} style={style} {...props}>
+      {children}
+    </Text>
+  );
+});
+
+export const MotionButton = React.forwardRef(({ children, style, onPress, disabled, whileHover, whileTap, initial, animate, exit, transition, ...props }, ref) => {
+  return (
+    <TouchableOpacity
+      ref={ref}
+      style={style}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.8}
+      {...props}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+});
+
+export const MotionImage = React.forwardRef(({ children, style, source, ...props }, ref) => {
+  return <Image ref={ref} style={style} source={source} {...props} />;
+});
 
 /**
  * Pre-configured Motion Spring Presets & Animation Variants
