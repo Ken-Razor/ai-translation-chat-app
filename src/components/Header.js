@@ -26,6 +26,7 @@ export default function Header({
   onOpenFriendProfile,
   currentUser,
   partnerUser,
+  isPartnerTyping = false,
   onStartVoiceCall,
   onStartVideoCall,
   onOpenTestCall,
@@ -86,11 +87,19 @@ export default function Header({
             <Text style={styles.partnerName} numberOfLines={1}>
               {displayTitle}
             </Text>
-            <TouchableOpacity onPress={onOpenLangPicker} activeOpacity={0.7} style={styles.langSubRow}>
-              <Text style={styles.subtitleText} numberOfLines={1}>
-                Translating to: {getLangLabel(targetLang)}
-              </Text>
-            </TouchableOpacity>
+            {isPartnerTyping ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11.5, color: '#10B981', fontWeight: '700' }}>
+                  ✍️ typing...
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={onOpenLangPicker} activeOpacity={0.7} style={styles.langSubRow}>
+                <Text style={styles.subtitleText} numberOfLines={1}>
+                  Translating to: {getLangLabel(targetLang)}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </View>

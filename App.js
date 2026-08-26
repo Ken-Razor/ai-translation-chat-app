@@ -13,7 +13,8 @@ import {
   Alert,
   Animated,
   Easing,
-  Dimensions
+  Dimensions,
+  AppState
 } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
@@ -32,6 +33,8 @@ import VideoCallModal from './src/components/VideoCallModal';
 import IncomingCallModal from './src/components/IncomingCallModal';
 import MediaPickerSheet from './src/components/MediaPickerSheet';
 import ImageViewerModal from './src/components/ImageViewerModal';
+import TypingIndicator from './src/components/TypingIndicator';
+import InAppNotificationBanner from './src/components/InAppNotificationBanner';
 
 import SplashScreen from './src/screens/SplashScreen';
 import LandingScreen from './src/screens/LandingScreen';
@@ -70,6 +73,11 @@ import { voiceService } from './src/services/voiceService';
 import { playAudioChunk, stopAudioStream } from './src/services/audioStreamService';
 import { webrtcService } from './src/services/webrtcService';
 import { getTheme } from './src/theme/colors';
+import {
+  initNotificationService,
+  playMessageSound,
+  triggerBackgroundNotification
+} from './src/services/notificationService';
 
 // Global caches for local voice note audio URIs & image URIs across polling cycles
 const localAudioCache = new Map();
@@ -136,10 +144,21 @@ export default function App() {
   ]);
   const [isVocabVisible, setIsVocabVisible] = useState(false);
   const [isProfileVisible, setIsProfileVisible] = useState(false);
+  const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+  const [inAppBannerData, setInAppBannerData] = useState(null);
+  const typingTimeoutRef = useRef(null);
+  const typingDebounceTimerRef = useRef(null);
+  const isTypingSentRef = useRef(false);
+  const wsRef = useRef(null);
   const flatListRef = useRef(null);
   const chatSlideAnim = useRef(new Animated.Value(0)).current;
   const tabAnim = useRef(new Animated.Value(1)).current;
   const isInitialTabMount = useRef(true);
+
+  // Initialize notification service and sound effects on app start
+  useEffect(() => {
+    initNotificationService();
+  }, []);
 
   // Smooth navbar tab switch animation effect (never goes to 0 opacity to prevent blank states)
   useEffect(() => {
@@ -214,6 +233,7 @@ export default function App() {
         const wsUrl = `${wsBase}?email=${encodeURIComponent(currentUser.email)}`;
 
         ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
         ws.onopen = () => {
           if (pingInterval) clearInterval(pingInterval);
@@ -228,6 +248,78 @@ export default function App() {
           if (!isSubscribed) return;
           try {
             const data = JSON.parse(e.data);
+
+            // 1. Handle Typing Indicator
+            if (data.type === 'typing') {
+              const sender = (data.sender || '').toLowerCase();
+              const activePartner = (partnerEmail || '').toLowerCase();
+              if (sender === activePartner) {
+                setIsPartnerTyping(!!data.isTyping);
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                if (data.isTyping) {
+                  typingTimeoutRef.current = setTimeout(() => {
+                    setIsPartnerTyping(false);
+                  }, 4000);
+                }
+              }
+            }
+
+            // 2. Handle Read Receipts (Turn double ticks to blue in real-time)
+            if (data.type === 'messages_read') {
+              const reader = (data.reader || '').toLowerCase();
+              const activePartner = (partnerEmail || '').toLowerCase();
+              if (reader === activePartner) {
+                setMessages(prev => {
+                  const updated = prev.map(m =>
+                    m.sender === 'user' ? { ...m, status: 'read' } : m
+                  );
+                  if (currentUser?.email && partnerEmail) {
+                    storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                  }
+                  return updated;
+                });
+              }
+            }
+
+            // 3. Handle Delivery Confirmation (Turn single tick to double gray tick)
+            if (data.type === 'messages_delivered') {
+              const rec = (data.recipient || '').toLowerCase();
+              const activePartner = (partnerEmail || '').toLowerCase();
+              if (rec === activePartner) {
+                setMessages(prev => {
+                  const updated = prev.map(m =>
+                    m.sender === 'user' && m.status === 'sent' ? { ...m, status: 'delivered' } : m
+                  );
+                  if (currentUser?.email && partnerEmail) {
+                    storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                  }
+                  return updated;
+                });
+              }
+            }
+
+            // 4. Handle Message Update (Async AI translation finished on server)
+            if (data.type === 'message_updated' && data.message) {
+              const updatedMsg = data.message;
+              setMessages(prev => {
+                const updated = prev.map(m =>
+                  m.id === updatedMsg.id
+                    ? {
+                        ...m,
+                        translatedText: updatedMsg.translatedText || m.translatedText,
+                        pinyin: updatedMsg.pinyin || m.pinyin,
+                        culturalNote: updatedMsg.culturalNote || m.culturalNote,
+                      }
+                    : m
+                );
+                if (currentUser?.email && partnerEmail) {
+                  storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                }
+                return updated;
+              });
+            }
+
+            // 5. Handle New Messages & Calls
             if (data.type === 'new_message' && data.message) {
               const m = data.message;
               const sender = (m.sender || m.senderEmail || '').toLowerCase();
@@ -235,6 +327,7 @@ export default function App() {
               const currentEmail = currentUser.email.toLowerCase();
               const activePartner = (partnerEmail || '').toLowerCase();
               const origText = m.originalText || m.text || '';
+              const isFriend = sender !== currentEmail;
 
               // Global incoming call detection (runs on all screens!)
               if (sender !== currentEmail && (origText.includes('[CALL_SIGNAL:') || origText.includes('[CALL_START:'))) {
@@ -330,44 +423,49 @@ export default function App() {
                 }
               }
 
-              // Handle Read Receipts (Turn double ticks to blue in real-time)
-              if (data.type === 'messages_read') {
-                const reader = (data.reader || '').toLowerCase();
-                const activePartner = (partnerEmail || '').toLowerCase();
-                if (reader === activePartner) {
-                  setMessages(prev => {
-                    const updated = prev.map(m =>
-                      m.sender === 'user' ? { ...m, status: 'read' } : m
-                    );
-                    if (currentUser?.email && partnerEmail) {
-                      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
-                    }
-                    return updated;
-                  });
-                }
-              }
-
-              // Handle Delivery Confirmation (Turn single tick to double gray tick)
-              if (data.type === 'messages_delivered') {
-                const rec = (data.recipient || '').toLowerCase();
-                const activePartner = (partnerEmail || '').toLowerCase();
-                if (rec === activePartner) {
-                  setMessages(prev => {
-                    const updated = prev.map(m =>
-                      m.sender === 'user' && m.status === 'sent' ? { ...m, status: 'delivered' } : m
-                    );
-                    if (currentUser?.email && partnerEmail) {
-                      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
-                    }
-                    return updated;
-                  });
-                }
-              }
-
               const isSignal = origText.includes('[CALL_') ||
                               origText.includes('[WEBRTC_') ||
                               origText.includes('[AUDIO_CHUNK:') ||
                               origText.includes('[VIDEO_FRAME:');
+
+              // --- In-Chat Sound, In-App Top Notification Banner, & Background Push Notification ---
+              if (isFriend && !isSignal) {
+                const isCurrentlyInThisChat = activeView === 'chatRoom' && activePartner === sender;
+                const isAppActive = AppState.currentState === 'active';
+
+                if (isCurrentlyInThisChat) {
+                  // Inside chat with sender: Play sound effect & mark as read
+                  playMessageSound();
+                  markPeerMessagesRead(currentUser.email, partnerEmail);
+                  setIsPartnerTyping(false);
+                } else if (isAppActive) {
+                  // Inside app on another tab/chat: Play sound effect & show Top Banner
+                  playMessageSound();
+                  const preview = origText.includes('[VOICE_DATA:')
+                    ? '🎵 Voice Note'
+                    : origText.includes('[IMAGE_DATA:')
+                    ? '📷 Photo'
+                    : origText;
+                  setInAppBannerData({
+                    senderEmail: m.senderEmail || sender,
+                    senderName: m.senderName || sender,
+                    text: preview,
+                    avatar: m.avatar || null,
+                  });
+                } else {
+                  // Outside app / device locked: Send OS-level push notification
+                  const preview = origText.includes('[VOICE_DATA:')
+                    ? '🎵 Voice Note'
+                    : origText.includes('[IMAGE_DATA:')
+                    ? '📷 Photo'
+                    : origText;
+                  triggerBackgroundNotification(
+                    m.senderName || sender,
+                    preview,
+                    { partnerEmail: sender }
+                  );
+                }
+              }
 
               if (
                 !isSignal &&
@@ -375,13 +473,6 @@ export default function App() {
                 ((sender === currentEmail && recipient === activePartner) ||
                  (sender === activePartner && recipient === currentEmail))
               ) {
-                const isFriend = sender !== currentEmail;
-                const isCurrentlyInChat = activeView === 'chatRoom' && activePartner === sender;
-                if (isFriend && isCurrentlyInChat) {
-                  // Mark as read immediately on server
-                  markPeerMessagesRead(currentUser.email, partnerEmail);
-                }
-
                 const newMsgObj = {
                   id: m.id || `msg_${Date.now()}`,
                   sender: isFriend ? 'friend' : 'user',
@@ -920,10 +1011,45 @@ export default function App() {
     }
   };
 
+  // Real-Time Typing Indicator Signal Dispatch
+  const sendTypingStatus = (isTyping) => {
+    if (wsRef.current && wsRef.current.readyState === 1 && currentUser?.email && partnerEmail) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'typing',
+          sender: currentUser.email,
+          recipient: partnerEmail,
+          isTyping: isTyping,
+        })
+      );
+    }
+  };
+
+  const handleInputChange = (text) => {
+    setInputText(text);
+    if (!isTypingSentRef.current && text.trim().length > 0) {
+      isTypingSentRef.current = true;
+      sendTypingStatus(true);
+    }
+    if (text.trim().length === 0) {
+      isTypingSentRef.current = false;
+      sendTypingStatus(false);
+    }
+    if (typingDebounceTimerRef.current) clearTimeout(typingDebounceTimerRef.current);
+    typingDebounceTimerRef.current = setTimeout(() => {
+      isTypingSentRef.current = false;
+      sendTypingStatus(false);
+    }, 2000);
+  };
+
   // Send Message with WhatsApp Status Ticks Progression (Zero-Delay Instant Dispatch)
   const handleSend = async (textToSend = null, options = {}) => {
     const text = textToSend || inputText;
     if (!text.trim() || !partnerEmail) return;
+
+    if (typingDebounceTimerRef.current) clearTimeout(typingDebounceTimerRef.current);
+    isTypingSentRef.current = false;
+    sendTypingStatus(false);
 
     setInputText('');
     isAtBottomRef.current = true;
@@ -1299,6 +1425,7 @@ export default function App() {
               status="Active now"
               currentUser={currentUser}
               targetLang={targetLang}
+              isPartnerTyping={isPartnerTyping}
               onOpenLangPicker={() => setIsLangPickerVisible(true)}
               onStartVoiceCall={handleStartVoiceCall}
               onStartVideoCall={handleStartVideoCall}
@@ -1323,6 +1450,17 @@ export default function App() {
                 showsVerticalScrollIndicator={false}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
+                ListHeaderComponent={
+                  isPartnerTyping ? (
+                    <TypingIndicator
+                      partnerName={
+                        allUsers.find(u => u.email && partnerEmail && u.email.toLowerCase() === partnerEmail.toLowerCase())?.displayName ||
+                        partnerEmail?.split('@')[0] ||
+                        'Partner'
+                      }
+                    />
+                  ) : null
+                }
                 ListFooterComponent={
                   messages.length > 0 ? (
                     <View style={styles.dateHeaderPill}>
@@ -1357,7 +1495,7 @@ export default function App() {
               {/* AI Smart Replies Bar */}
               <QuickReplies
                 onSelectReply={replyText => {
-                  setInputText(replyText);
+                  handleInputChange(replyText);
                 }}
                 theme={activeTheme}
               />
@@ -1418,7 +1556,7 @@ export default function App() {
                       placeholder={isRecordingVoice ? "Recording audio note..." : "Type a message to translate..."}
                       placeholderTextColor="#80737d"
                       value={inputText}
-                      onChangeText={setInputText}
+                      onChangeText={handleInputChange}
                       multiline={true}
                       textAlignVertical="center"
                     />
@@ -1529,6 +1667,16 @@ export default function App() {
           onClose={() => setIsProfileVisible(false)}
           user={currentUser}
           onLogout={handleLogout}
+        />
+
+        {/* In-App Floating Top Notification Banner (for messages received outside active chat) */}
+        <InAppNotificationBanner
+          data={inAppBannerData}
+          onPress={(senderEmail) => {
+            setInAppBannerData(null);
+            handleSelectChat(senderEmail);
+          }}
+          onDismiss={() => setInAppBannerData(null)}
         />
             </View>
         )}

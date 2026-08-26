@@ -836,22 +836,13 @@ const server = http.createServer(async (req, res) => {
       let pinyin = body.pinyin || '';
       let culturalNote = body.culturalNote || null;
 
-      // Auto-translate on server if not provided
-      if ((!translatedText || translatedText === text) && text && !text.startsWith('[')) {
-        const transRes = await serverTranslate(text, body.targetLang || 'en', body.tone || 'casual');
-        if (transRes && transRes.translatedText) {
-          translatedText = transRes.translatedText;
-          pinyin = transRes.pinyin || '';
-          culturalNote = transRes.culturalNote || null;
-        }
-      }
-
       const recipientNorm = recipient.toLowerCase().trim();
       const isRecipientConnected = recipientNorm && wsClients.has(recipientNorm) && wsClients.get(recipientNorm).size > 0;
       const initialStatus = isRecipientConnected ? 'delivered' : 'sent';
 
+      const msgId = 'msg_' + Date.now();
       const newMsg = {
-        id: 'msg_' + Date.now(),
+        id: msgId,
         sender: sender,
         recipient: recipient,
         senderEmail: sender,
@@ -870,11 +861,32 @@ const server = http.createServer(async (req, res) => {
         timestamp: new Date().toISOString(),
         status: initialStatus
       };
+
       allMsgs.push(newMsg);
       saveMessages(allMsgs); // Encrypted at Rest with AES-256-GCM!
       broadcastMessage(newMsg); // Broadcast live in-memory payload over WebSocket
+
+      // ⚡ Immediate HTTP response (<5ms) - Eliminates timer delay on sender UI!
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      return res.end(JSON.stringify({ success: true, message: newMsg }));
+      res.end(JSON.stringify({ success: true, message: newMsg }));
+
+      // ⚡ Asynchronous AI translation in background (does not block HTTP response or status ticks)
+      if ((!translatedText || translatedText === text) && text && !text.startsWith('[')) {
+        serverTranslate(text, body.targetLang || 'en', body.tone || 'casual').then(transRes => {
+          if (transRes && transRes.translatedText) {
+            const currentMsgs = getMessages();
+            const target = currentMsgs.find(m => m.id === msgId);
+            if (target) {
+              target.translatedText = transRes.translatedText;
+              target.pinyin = transRes.pinyin || '';
+              target.culturalNote = transRes.culturalNote || null;
+              saveMessages(currentMsgs);
+              broadcastMessageUpdate(target);
+            }
+          }
+        }).catch(e => console.warn('Async translation error:', e.message));
+      }
+      return;
     }
 
     // 12. Direct AI Translation Proxy (100% CORS-free and instant)
@@ -1092,6 +1104,21 @@ wss.on('connection', (ws, req) => {
           }
         }
       }
+      if (msgObj.type === 'typing') {
+        const sender = (msgObj.sender || '').toLowerCase().trim();
+        const recipient = (msgObj.recipient || '').toLowerCase().trim();
+        const isTyping = !!msgObj.isTyping;
+        if (recipient && wsClients.has(recipient)) {
+          const typingPayload = JSON.stringify({
+            type: 'typing',
+            sender: sender,
+            isTyping: isTyping,
+          });
+          wsClients.get(recipient).forEach(c => {
+            if (c.readyState === 1) c.send(typingPayload);
+          });
+        }
+      }
     } catch (e) {}
   });
 
@@ -1115,6 +1142,31 @@ function broadcastMessage(msg) {
   const recipient = (msg.recipient || msg.recipientEmail || '').toLowerCase().trim();
   const payload = JSON.stringify({
     type: 'new_message',
+    message: msg
+  });
+
+  if (recipient && wsClients.has(recipient)) {
+    wsClients.get(recipient).forEach(client => {
+      if (client.readyState === 1) {
+        client.send(payload);
+      }
+    });
+  }
+
+  if (sender && wsClients.has(sender)) {
+    wsClients.get(sender).forEach(client => {
+      if (client.readyState === 1) {
+        client.send(payload);
+      }
+    });
+  }
+}
+
+function broadcastMessageUpdate(msg) {
+  const sender = (msg.sender || msg.senderEmail || '').toLowerCase().trim();
+  const recipient = (msg.recipient || msg.recipientEmail || '').toLowerCase().trim();
+  const payload = JSON.stringify({
+    type: 'message_updated',
     message: msg
   });
 
