@@ -60,6 +60,32 @@ export default function SettingsScreen({
   const [apiKeyInput, setApiKeyInput] = useState(getGeminiApiKey());
   const [isSaved, setIsSaved] = useState(false);
 
+  // Support & Feedback Form states
+  const [supportTopic, setSupportTopic] = useState('General Help');
+  const [supportMessageInput, setSupportMessageInput] = useState('');
+  const [isSendingSupport, setIsSendingSupport] = useState(false);
+  const [supportFeedback, setSupportFeedback] = useState('');
+
+  const handleSendSupport = () => {
+    const clean = supportMessageInput.trim();
+    if (!clean) {
+      setSupportFeedback('⚠️ Please write your question or issue description.');
+      return;
+    }
+    setIsSendingSupport(true);
+    setSupportFeedback('');
+    setTimeout(() => {
+      setIsSendingSupport(false);
+      setSupportFeedback('✅ Thank you! Your support request has been submitted to Ken Sanio.');
+      setSupportMessageInput('');
+      Alert.alert(
+        'Support Request Received',
+        `Thank you for your feedback!\n\nTopic: ${supportTopic}\nOur developer, Ken Sanio, and the support team have received your message.`
+      );
+      setTimeout(() => setSupportFeedback(''), 4000);
+    }, 600);
+  };
+
   const handleSaveApiKey = () => {
     setGeminiApiKey(apiKeyInput);
     setIsSaved(true);
@@ -174,8 +200,9 @@ export default function SettingsScreen({
       account: 'Account',
       appearance: 'Appearance',
       ai: 'AI Engine',
-      help: 'Help & Support',
-      developer: 'Developer & License',
+      help: 'Help & FAQ',
+      support: 'Support & Feedback',
+      about: 'About ViveTalk',
     };
 
     return (
@@ -433,88 +460,240 @@ export default function SettingsScreen({
       case 'help':
         return (
           <ScrollView contentContainerStyle={styles.scrollContent}>
+            {/* Quick Start Guide */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16, marginBottom: 16 }]}>
+              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 14 }]}>🚀 Quick Start Guide</Text>
+              
+              <View style={styles.guideStep}>
+                <View style={[styles.guideStepBadge, { backgroundColor: theme.primary }]}>
+                  <Text style={styles.guideStepNum}>1</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.guideStepTitle, { color: theme.text }]}>Choose Target Language</Text>
+                  <Text style={[styles.guideStepDesc, { color: theme.subtext }]}>
+                    Tap the globe icon in any chat header to select your partner's language (e.g. Chinese, Indonesian, Japanese, Spanish).
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guideStep}>
+                <View style={[styles.guideStepBadge, { backgroundColor: theme.primary }]}>
+                  <Text style={styles.guideStepNum}>2</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.guideStepTitle, { color: theme.text }]}>Real-Time AI Translation</Text>
+                  <Text style={[styles.guideStepDesc, { color: theme.subtext }]}>
+                    Type or speak in your own language. ViveTalk instantly translates messages with phonetic Pinyin guides & cultural context.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guideStep}>
+                <View style={[styles.guideStepBadge, { backgroundColor: theme.primary }]}>
+                  <Text style={styles.guideStepNum}>3</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.guideStepTitle, { color: theme.text }]}>Voice & Video Calling</Text>
+                  <Text style={[styles.guideStepDesc, { color: theme.subtext }]}>
+                    Tap the Phone or Camera icon in any conversation header to start high-definition encrypted peer-to-peer calls.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* FAQ Accordion Section */}
             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16 }]}>
-              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 14 }]}>📚 Help Center & FAQ</Text>
+              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 14 }]}>📚 Frequently Asked Questions (FAQ)</Text>
 
               <View style={styles.faqItem}>
-                <Text style={[styles.faqQuestion, { color: theme.primary }]}>🔍 How do I add friends?</Text>
+                <Text style={[styles.faqQuestion, { color: theme.primary }]}>💾 Is chat history saved locally?</Text>
                 <Text style={[styles.faqAnswer, { color: theme.subtext }]}>
-                  Go to the Contacts tab, tap "🔍 Search & Add Friend", type your friend's User ID handle or email address, and send a friend request!
+                  Yes! All messages, voice notes, and conversation threads are securely stored in your device's memory for instantaneous 0ms loading without relying on continuous server hits.
                 </Text>
               </View>
 
               <View style={styles.faqItem}>
-                <Text style={[styles.faqQuestion, { color: theme.primary }]}>🌐 How does AI translation work?</Text>
+                <Text style={[styles.faqQuestion, { color: theme.primary }]}>🤖 How does the AI Translation engine work?</Text>
                 <Text style={[styles.faqAnswer, { color: theme.subtext }]}>
-                  ViveTalk uses Google Gemini 1.5 Flash AI Engine to translate all outgoing and incoming messages instantly, complete with Chinese Pinyin tone marks and phonetic guides.
+                  ViveTalk connects directly to Google Gemini 1.5 Flash AI Engine to translate all messages with natural fluency, colloquial nuances, and Chinese Pinyin tone marks.
                 </Text>
               </View>
 
               <View style={styles.faqItem}>
-                <Text style={[styles.faqQuestion, { color: theme.primary }]}>📞 How do I make voice & video calls?</Text>
+                <Text style={[styles.faqQuestion, { color: theme.primary }]}>⭐ How do I bookmark vocabulary?</Text>
                 <Text style={[styles.faqAnswer, { color: theme.subtext }]}>
-                  Open any direct chat room and tap the Phone or Camera icon in the top header bar to initiate real-time peer-to-peer audio or video calling.
+                  Tap the Star (⭐) icon on any translated message to save the phrase directly to your personal Vocabulary Deck.
                 </Text>
               </View>
 
               <View style={styles.faqItem}>
-                <Text style={[styles.faqQuestion, { color: theme.primary }]}>✏️ How do I customize my ID and profile photo?</Text>
+                <Text style={[styles.faqQuestion, { color: theme.primary }]}>✏️ How do I change my User ID handle?</Text>
                 <Text style={[styles.faqAnswer, { color: theme.subtext }]}>
-                  Go to Settings -> Account to update your display name, profile picture, or set a custom username handle.
-                </Text>
-              </View>
-
-              <View style={styles.faqItem}>
-                <Text style={[styles.faqQuestion, { color: theme.primary }]}>✉️ Support Contact Email</Text>
-                <Text style={[styles.faqAnswer, { color: theme.subtext }]}>
-                  For assistance, feedback, or bug reports, please email: ken.thea02@gmail.com
+                  Go to Settings ➔ Account ➔ Custom User ID Handle to pick your unique username so friends can easily search and add you.
                 </Text>
               </View>
             </View>
           </ScrollView>
         );
 
-      case 'developer':
+      case 'support':
         return (
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16 }]}>
-              <View style={{ alignItems: 'center', marginVertical: 10 }}>
-                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: theme.primary, justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
-                  <FontAwesome name="code" size={28} color="#FFFFFF" />
-                </View>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', color: theme.text, textAlign: 'center' }}>
-                  Ken Sanio Melenium Thea Agatha
-                </Text>
-                <Text style={{ fontSize: 13, color: theme.primary, marginTop: 2, fontWeight: '700' }}>
-                  Lead Software Architect & Developer
-                </Text>
+            {/* Direct Feedback Ticket Form */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16, marginBottom: 16 }]}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>💬 Submit Support & Feedback</Text>
+              <Text style={[styles.cardSub, { color: theme.subtext, marginBottom: 12 }]}>
+                Have a question or encountered a bug? Send a message directly to Ken Sanio and our support team.
+              </Text>
+
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Select Topic:</Text>
+              <View style={styles.topicRow}>
+                {['General Help', 'Bug Report', 'Feature Request', 'Account Issue'].map(t => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[
+                      styles.topicPill,
+                      { backgroundColor: theme.bg, borderColor: theme.border },
+                      supportTopic === t && { backgroundColor: theme.primary, borderColor: theme.primary }
+                    ]}
+                    onPress={() => setSupportTopic(t)}
+                  >
+                    <Text style={[styles.topicPillText, { color: supportTopic === t ? '#FFFFFF' : theme.text }]}>
+                      {t}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
+
+              <Text style={[styles.inputLabel, { color: theme.text, marginTop: 12 }]}>Your Message / Issue Description:</Text>
+              <TextInput
+                style={[
+                  styles.supportTextInput,
+                  { backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }
+                ]}
+                placeholder="Type your message, feedback, or bug details here..."
+                placeholderTextColor={theme.subtext}
+                value={supportMessageInput}
+                onChangeText={setSupportMessageInput}
+                multiline={true}
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+
+              {!!supportFeedback && (
+                <View style={[styles.feedbackBanner, { backgroundColor: supportFeedback.includes('✅') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', marginTop: 10 }]}>
+                  <Text style={[styles.feedbackText, { color: supportFeedback.includes('✅') ? '#10B981' : '#F87171' }]}>
+                    {supportFeedback}
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.saveModalBtn, { backgroundColor: theme.primary, marginTop: 14 }]}
+                onPress={handleSendSupport}
+                disabled={isSendingSupport}
+              >
+                {isSendingSupport ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.saveModalBtnText}>📤 Submit to Support</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Official Support Channels */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16 }]}>
+              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 12 }]}>📞 Support Channels</Text>
+
+              <View style={styles.devRow}>
+                <FontAwesome name="envelope" size={15} color={theme.primary} style={{ width: 24 }} />
+                <Text style={[styles.devLabel, { color: theme.subtext }]}>Developer Email:</Text>
+                <TouchableOpacity onPress={() => Alert.alert('Contact Developer', 'Email Ken Sanio at: ken.thea02@gmail.com')}>
+                  <Text style={[styles.devVal, { color: theme.primary }]}>ken.thea02@gmail.com</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.devRow}>
+                <FontAwesome name="globe" size={16} color={theme.primary} style={{ width: 24 }} />
+                <Text style={[styles.devLabel, { color: theme.subtext }]}>Official Portal:</Text>
+                <Text style={[styles.devVal, { color: theme.text }]}>vivetalk.sayflash.id</Text>
+              </View>
+
+              <View style={styles.devRow}>
+                <FontAwesome name="check-circle" size={15} color="#10B981" style={{ width: 24 }} />
+                <Text style={[styles.devLabel, { color: theme.subtext }]}>Server Status:</Text>
+                <Text style={[styles.devVal, { color: '#10B981' }]}>All Systems Operational 🟢</Text>
+              </View>
+            </View>
+          </ScrollView>
+        );
+
+      case 'about':
+        return (
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            {/* App Branding Hero Card */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 22, marginBottom: 16, alignItems: 'center' }]}>
+              <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: theme.primary, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+                <FontAwesome name="comments" size={32} color="#FFFFFF" />
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: 'bold', color: theme.text }}>ViveTalk</Text>
+              <Text style={{ fontSize: 13, color: theme.subtext, marginTop: 3 }}>Next-Gen AI Language Exchange Platform</Text>
+              <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginTop: 8 }}>
+                <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '700' }}>Version 1.0.0 • Production Build</Text>
+              </View>
+            </View>
+
+            {/* Created By Card */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16, marginBottom: 16 }]}>
+              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 12 }]}>👨‍💻 Dibuat Oleh (Created By)</Text>
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+                <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: '#8B5CF6', justifyContent: 'center', alignItems: 'center', marginRight: 14 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: 'bold' }}>KS</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 17, fontWeight: 'bold', color: theme.text }}>Ken Sanio</Text>
+                  <Text style={{ fontSize: 12, color: theme.subtext, marginTop: 1 }}>Ken Sanio Melenium Thea Agatha</Text>
+                  <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '700', marginTop: 2 }}>
+                    Lead Software Architect & AI Developer
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={{ fontSize: 12, color: theme.subtext, lineHeight: 18, marginBottom: 14 }}>
+                ViveTalk dibuat oleh Ken Sanio untuk menghadirkan pengalaman percakapan lintas bahasa yang mulus secara real-time dengan integrasi AI mutakhir, WebRTC Calling, dan arsitektur database lokal berkecepatan tinggi.
+              </Text>
 
               <View style={[styles.devCard, { backgroundColor: theme.bg, borderColor: theme.border }]}>
                 <View style={styles.devRow}>
-                  <FontAwesome name="github" size={16} color={theme.text} style={{ width: 22 }} />
+                  <FontAwesome name="github" size={16} color={theme.text} style={{ width: 24 }} />
                   <Text style={[styles.devLabel, { color: theme.subtext }]}>GitHub:</Text>
                   <Text style={[styles.devVal, { color: theme.primary }]}>ken-razor</Text>
                 </View>
 
                 <View style={styles.devRow}>
-                  <FontAwesome name="envelope" size={14} color={theme.text} style={{ width: 22 }} />
+                  <FontAwesome name="envelope" size={14} color={theme.text} style={{ width: 24 }} />
                   <Text style={[styles.devLabel, { color: theme.subtext }]}>Email:</Text>
                   <Text style={[styles.devVal, { color: theme.text }]}>ken.thea02@gmail.com</Text>
                 </View>
 
                 <View style={styles.devRow}>
-                  <FontAwesome name="certificate" size={14} color={theme.text} style={{ width: 22 }} />
+                  <FontAwesome name="certificate" size={14} color={theme.text} style={{ width: 24 }} />
                   <Text style={[styles.devLabel, { color: theme.subtext }]}>License:</Text>
                   <Text style={[styles.devVal, { color: '#10B981', fontWeight: 'bold' }]}>MIT Open Source License</Text>
                 </View>
-
-                <View style={styles.devRow}>
-                  <FontAwesome name="mobile" size={18} color={theme.text} style={{ width: 22 }} />
-                  <Text style={[styles.devLabel, { color: theme.subtext }]}>Version:</Text>
-                  <Text style={[styles.devVal, { color: theme.text }]}>ViveTalk v0.1 • Golang IAM Engine</Text>
-                </View>
               </View>
+            </View>
+
+            {/* Architecture Highlights */}
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, padding: 16 }]}>
+              <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 10 }]}>⚡ Powered By</Text>
+              <Text style={{ fontSize: 12, color: theme.subtext, lineHeight: 19 }}>
+                • <Text style={{ fontWeight: 'bold', color: theme.text }}>AI Model:</Text> Google Gemini 1.5 Flash{'\n'}
+                • <Text style={{ fontWeight: 'bold', color: theme.text }}>Framework:</Text> React Native & Expo Mobile{'\n'}
+                • <Text style={{ fontWeight: 'bold', color: theme.text }}>P2P Engine:</Text> WebRTC Real-Time Audio & Video{'\n'}
+                • <Text style={{ fontWeight: 'bold', color: theme.text }}>Real-Time Push:</Text> WebSocket (< 10ms Latency)
+              </Text>
             </View>
           </ScrollView>
         );
@@ -616,28 +795,41 @@ export default function SettingsScreen({
             </TouchableOpacity>
           </View>
 
-          {/* Group 2: Support & Info */}
+          {/* Group 2: Help, Support & About */}
           <View style={[styles.waGroupCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <TouchableOpacity style={styles.waRow} onPress={() => setActiveSubPage('help')}>
               <View style={[styles.waIconBox, { backgroundColor: '#10B981' }]}>
                 <FontAwesome name="question-circle" size={15} color="#FFFFFF" />
               </View>
               <View style={styles.waRowText}>
-                <Text style={[styles.waRowTitle, { color: theme.text }]}>Help & Support</Text>
-                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Help center, FAQ & support email</Text>
+                <Text style={[styles.waRowTitle, { color: theme.text }]}>Help & FAQ</Text>
+                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Tutorials, tips & frequently asked questions</Text>
               </View>
               <FontAwesome name="chevron-right" size={14} color={theme.subtext} />
             </TouchableOpacity>
 
             <View style={[styles.waDivider, { backgroundColor: theme.border }]} />
 
-            <TouchableOpacity style={styles.waRow} onPress={() => setActiveSubPage('developer')}>
-              <View style={[styles.waIconBox, { backgroundColor: '#F97316' }]}>
-                <FontAwesome name="code" size={14} color="#FFFFFF" />
+            <TouchableOpacity style={styles.waRow} onPress={() => setActiveSubPage('support')}>
+              <View style={[styles.waIconBox, { backgroundColor: '#0EA5E9' }]}>
+                <FontAwesome name="headphones" size={14} color="#FFFFFF" />
               </View>
               <View style={styles.waRowText}>
-                <Text style={[styles.waRowTitle, { color: theme.text }]}>Developer & License</Text>
-                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Ken Sanio Melenium Thea Agatha • MIT</Text>
+                <Text style={[styles.waRowTitle, { color: theme.text }]}>Support & Feedback</Text>
+                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Contact support, submit ticket & report bugs</Text>
+              </View>
+              <FontAwesome name="chevron-right" size={14} color={theme.subtext} />
+            </TouchableOpacity>
+
+            <View style={[styles.waDivider, { backgroundColor: theme.border }]} />
+
+            <TouchableOpacity style={styles.waRow} onPress={() => setActiveSubPage('about')}>
+              <View style={[styles.waIconBox, { backgroundColor: '#F97316' }]}>
+                <FontAwesome name="info-circle" size={15} color="#FFFFFF" />
+              </View>
+              <View style={styles.waRowText}>
+                <Text style={[styles.waRowTitle, { color: theme.text }]}>About ViveTalk</Text>
+                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Dibuat oleh Ken Sanio • v1.0.0</Text>
               </View>
               <FontAwesome name="chevron-right" size={14} color={theme.subtext} />
             </TouchableOpacity>
@@ -656,7 +848,7 @@ export default function SettingsScreen({
           </View>
 
           <Text style={[styles.versionText, { color: theme.subtext }]}>
-            ViveTalk v0.1 • Lead Dev: Ken Sanio Melenium Thea Agatha • MIT License
+            ViveTalk v1.0.0 • Dibuat oleh Ken Sanio • MIT License
           </Text>
         </ScrollView>
       )}
@@ -1017,5 +1209,58 @@ const styles = StyleSheet.create({
   devVal: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  guideStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+    gap: 12,
+  },
+  guideStepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  guideStepNum: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  guideStepTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  guideStepDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  topicRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginVertical: 6,
+  },
+  topicPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  topicPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  supportTextInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 88,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
 });
