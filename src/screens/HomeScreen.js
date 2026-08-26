@@ -58,10 +58,9 @@ const getFlagForLang = (raw) => {
 
 export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser }) {
   const insets = useSafeAreaInsets();
-  const [registeredUsers, setRegisteredUsers] = useState([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
   const myEmail = (user?.email || '').toLowerCase();
+  const [registeredUsers, setRegisteredUsers] = useState(() => storageService.getSyncHomeUsers(myEmail));
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 1. Instant 0ms Load from Local Storage Cache on Mount
   useEffect(() => {

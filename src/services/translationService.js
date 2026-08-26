@@ -306,3 +306,18 @@ export async function markPeerMessagesRead(userEmail, partnerEmail) {
     console.warn('Failed to mark messages as read:', err);
   }
 }
+
+/**
+ * Fetch consolidated conversations list with last messages in 1 instant call
+ */
+export async function fetchConversationsList(userEmail) {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/chat/conversations?email=${encodeURIComponent(userEmail)}`);
+    const data = await res.json();
+    if (Array.isArray(data)) return data;
+    return data.conversations || [];
+  } catch (err) {
+    console.warn('Failed to fetch conversations list:', err);
+    return [];
+  }
+}

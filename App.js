@@ -287,6 +287,30 @@ export default function App() {
                 }
               }
 
+              // Handle incoming live video frame snapshots for 2-way Video Call
+              if (origText.includes('[VIDEO_FRAME:')) {
+                const startIdx = origText.indexOf('[VIDEO_FRAME:') + '[VIDEO_FRAME:'.length;
+                const endIdx = origText.lastIndexOf(']');
+                if (startIdx > 0 && endIdx > startIdx) {
+                  const frameData = origText.substring(startIdx, endIdx);
+                  if (frameData.length > 50) {
+                    setRemoteVideoFrameUri(`data:image/jpeg;base64,${frameData}`);
+                  }
+                }
+              }
+
+              // Handle incoming live speech audio stream chunks
+              if (origText.includes('[AUDIO_CHUNK:') && sender !== currentEmail) {
+                const startIdx = origText.indexOf('[AUDIO_CHUNK:') + '[AUDIO_CHUNK:'.length;
+                const endIdx = origText.lastIndexOf(']');
+                if (startIdx > 0 && endIdx > startIdx) {
+                  const audioData = origText.substring(startIdx, endIdx);
+                  if (audioData.length > 50) {
+                    playAudioChunk(audioData);
+                  }
+                }
+              }
+
               const isSignal = origText.includes('[CALL_') ||
                               origText.includes('[WEBRTC_') ||
                               origText.includes('[AUDIO_CHUNK:') ||
@@ -317,7 +341,9 @@ export default function App() {
 
                 setMessages(prev => {
                   if (prev.some(existing => existing.id === newMsgObj.id)) return prev;
-                  return [...prev, newMsgObj];
+                  const updated = [...prev, newMsgObj];
+                  storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                  return updated;
                 });
               }
             }
@@ -357,199 +383,6 @@ export default function App() {
       }
     }).catch(() => {});
   }, [currentUser, activeTab]);
-
-  // ============================================
-  // Call Signal Polling Engine (Global background check)
-  // ============================================
-  useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
-
-    const pollCallSignals = async () => {
-      try {
-        const users = userListCacheRef.current;
-        const otherUsers = users.filter(u => u.email.toLowerCase() !== currentUser.email.toLowerCase());
-
-        if (handledCallSignalsRef.current.size > 150) {
-          handledCallSignalsRef.current.clear();
-        }
-
-        for (const otherUser of otherUsers) {
-          const peerMsgs = await fetchPeerMessages(currentUser.email, otherUser.email);
-          if (!peerMsgs || peerMsgs.length === 0) continue;
-          if (!peerMsgs || peerMsgs.length === 0) continue;
-
-          // Filter to messages sent BY THE PARTNER to ensure we never miss incoming audio chunks
-          const partnerMsgs = peerMsgs.filter(m => m.senderEmail && m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase());
-          if (partnerMsgs.length === 0) continue;
-
-          // Process the last 25 messages sent by partner
-          const recentMsgs = partnerMsgs.length > 25 ? partnerMsgs.slice(-25) : partnerMsgs;
-
-          for (const m of recentMsgs) {
-            if (!m.originalText) continue;
-
-            const signalKey = m.id || `${m.timestamp}_${m.originalText.length}`;
-
-            // ON INITIAL LOGIN / LOAD: Seed ALL existing signals so stale calls NEVER trigger ringtones!
-            if (isFirstCallPollRef.current) {
-              handledCallSignalsRef.current.add(signalKey);
-              continue;
-            }
-
-            // Handle incoming live video frame snapshots for 2-way Video Call
-            if (m.originalText.includes('[VIDEO_FRAME:')) {
-              const frameKey = m.id ? `frame_${m.id}` : `frame_${m.timestamp}`;
-              if (!handledCallSignalsRef.current.has(frameKey)) {
-                handledCallSignalsRef.current.add(frameKey);
-                const startIdx = m.originalText.indexOf('[VIDEO_FRAME:') + '[VIDEO_FRAME:'.length;
-                const endIdx = m.originalText.lastIndexOf(']');
-                if (startIdx > 0 && endIdx > startIdx) {
-                  const frameData = m.originalText.substring(startIdx, endIdx);
-                  if (frameData.length > 50) {
-                    setRemoteVideoFrameUri(`data:image/jpeg;base64,${frameData}`);
-                  }
-                }
-              }
-              continue;
-            }
-
-            // Ignore any signal sent by OURSELVES to prevent infinite speaker/mic feedback loops!
-            if (m.senderEmail && m.senderEmail.toLowerCase() === currentUser.email.toLowerCase()) {
-              continue;
-            }
-
-            // Handle incoming live speech audio stream chunks (ONLY during active call & from partner!)
-            if ((isVoiceCallVisible || isVideoCallVisible) && m.originalText.includes('[AUDIO_CHUNK:')) {
-              const chunkKey = m.id ? `chunk_${m.id}` : `chunk_${m.timestamp}_${m.originalText.length}`;
-              if (!handledCallSignalsRef.current.has(chunkKey)) {
-                handledCallSignalsRef.current.add(chunkKey);
-                const startIdx = m.originalText.indexOf('[AUDIO_CHUNK:') + '[AUDIO_CHUNK:'.length;
-                const endIdx = m.originalText.lastIndexOf(']');
-                if (startIdx > 0 && endIdx > startIdx) {
-                  const audioData = m.originalText.substring(startIdx, endIdx);
-                  if (audioData.length > 50) {
-                    playAudioChunk(audioData);
-                  }
-                }
-              }
-              continue;
-            }
-
-            // Handle WebRTC SDP Offer
-            if (m.originalText.includes('[WEBRTC_OFFER:')) {
-              const offerKey = m.id ? `offer_${m.id}` : `offer_${m.timestamp}`;
-              if (!handledCallSignalsRef.current.has(offerKey)) {
-                handledCallSignalsRef.current.add(offerKey);
-                const sdpStr = m.originalText.substring(m.originalText.indexOf('[WEBRTC_OFFER:') + '[WEBRTC_OFFER:'.length, m.originalText.lastIndexOf(']'));
-                if (sdpStr) {
-                  webrtcService.handleOffer(sdpStr, currentUser.email, m.senderEmail);
-                }
-              }
-            }
-
-            // Handle WebRTC SDP Answer
-            if (m.originalText.includes('[WEBRTC_ANSWER:')) {
-              const answerKey = m.id ? `answer_${m.id}` : `answer_${m.timestamp}`;
-              if (!handledCallSignalsRef.current.has(answerKey)) {
-                handledCallSignalsRef.current.add(answerKey);
-                const sdpStr = m.originalText.substring(m.originalText.indexOf('[WEBRTC_ANSWER:') + '[WEBRTC_ANSWER:'.length, m.originalText.lastIndexOf(']'));
-                if (sdpStr) {
-                  webrtcService.handleAnswer(sdpStr);
-                }
-              }
-            }
-
-            // Handle WebRTC ICE Candidate
-            if (m.originalText.includes('[WEBRTC_ICE:')) {
-              const iceKey = m.id ? `ice_${m.id}` : `ice_${m.timestamp}`;
-              if (!handledCallSignalsRef.current.has(iceKey)) {
-                handledCallSignalsRef.current.add(iceKey);
-                const candidateStr = m.originalText.substring(m.originalText.indexOf('[WEBRTC_ICE:') + '[WEBRTC_ICE:'.length, m.originalText.lastIndexOf(']'));
-                if (candidateStr) {
-                  webrtcService.addIceCandidate(candidateStr);
-                }
-              }
-            }
-
-            if (!m.originalText.includes('[CALL_')) continue;
-
-            // Only process recent call signals (< 60 seconds old)
-            const signalTime = new Date(m.timestamp).getTime();
-            const now = Date.now();
-            if (isNaN(signalTime) || now - signalTime > 60000) continue;
-
-            if (handledCallSignalsRef.current.has(signalKey)) continue;
-
-            // INCOMING CALL SIGNAL
-            if (m.originalText.includes('[CALL_SIGNAL:')) {
-              const match = m.originalText.match(/\[CALL_SIGNAL:(voice|video):([^\]]+)\]/);
-              if (match) {
-                const [, callType, callId] = match;
-                handledCallSignalsRef.current.add(signalKey);
-                activeCallIdRef.current = callId;
-                // Mark as callee so modals don't create a new SDP offer
-                webrtcService.isCalleeMode = true;
-                setIncomingCallData({
-                  callId,
-                  callerEmail: m.senderEmail,
-                  callerName: m.senderName || m.senderEmail,
-                  callType,
-                });
-                startRingtoneLoop('incoming');
-                // 30-second incoming call timeout
-                if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
-                incomingCallTimerRef.current = setTimeout(() => {
-                  stopRingtoneLoop();
-                  setIncomingCallData(null);
-                }, 30000);
-              }
-            }
-
-            // CALL ACCEPTED by the other side — only if it matches our active call
-            if (m.originalText.includes('[CALL_ACCEPT:')) {
-              const acceptMatch = m.originalText.match(/\[CALL_ACCEPT:([^\]]+)\]/);
-              if (acceptMatch && activeCallIdRef.current && acceptMatch[1] === activeCallIdRef.current) {
-                handledCallSignalsRef.current.add(signalKey);
-                stopRingtoneLoop();
-                setIsCallConnected(true);
-                if (callRingingTimerRef.current) {
-                  clearTimeout(callRingingTimerRef.current);
-                  callRingingTimerRef.current = null;
-                }
-              }
-            }
-
-            // DECLINED / ENDED by the other side — only if it matches our active call
-            if (m.originalText.includes('[CALL_DECLINE:') || m.originalText.includes('[CALL_END:')) {
-              const endMatch = m.originalText.match(/\[CALL_(?:DECLINE|END):([^\]]+)\]/);
-              if (endMatch && activeCallIdRef.current && endMatch[1] === activeCallIdRef.current) {
-                handledCallSignalsRef.current.add(signalKey);
-                stopRingtoneLoop();
-                stopAudioStream();
-                webrtcService.close();
-                setIsCallConnected(false);
-                setIncomingCallData(null);
-                setIsVoiceCallVisible(false);
-                setIsVideoCallVisible(false);
-                activeCallIdRef.current = null;
-                if (callRingingTimerRef.current) clearTimeout(callRingingTimerRef.current);
-                if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
-              }
-            }
-          }
-        }
-        isFirstCallPollRef.current = false;
-      } catch (err) {
-        // Silent fail for call signal polling
-      }
-    };
-
-    pollCallSignals();
-    const callPollInterval = setInterval(pollCallSignals, 1000);
-    return () => clearInterval(callPollInterval);
-  }, [currentUser, isVoiceCallVisible, isVideoCallVisible]);
 
   // ============================================
   // Chat Room Message Polling (only when inside a chat room)

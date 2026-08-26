@@ -101,13 +101,16 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
       const currentUser = authService.getCurrentUser();
       const currentEmail = (currentUser?.email || '').toLowerCase();
       const interactedMap = await storageService.getInteractedUsers(currentEmail);
+      const localChatList = await storageService.getLocalChatList(currentEmail);
+      const chatEmails = new Set((localChatList || []).map(c => (c.email || '').toLowerCase()));
 
-      // Exclude currently logged in user AND already liked/passed/matched users
+      // Exclude currently logged in user AND already liked/passed/matched/chatted users
       const otherUsers = (allUsers || []).filter(u => {
         const uEmail = (u.email || '').toLowerCase();
         const uId = (u.id || '').toLowerCase();
         if (!uEmail || uEmail === currentEmail) return false;
         if (interactedMap[uEmail] || (uId && interactedMap[uId])) return false;
+        if (chatEmails.has(uEmail)) return false;
         return true;
       });
 
@@ -214,23 +217,25 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
     }
   };
 
-  const handlePass = () => {
+  const handlePass = async () => {
     if (!currentProfile) return;
+    const target = currentProfile;
     voiceService.stopPlayback();
     Speech.stop();
     setIsPlayingAudio(false);
 
     const currentUser = authService.getCurrentUser();
     const currentEmail = (currentUser?.email || '').toLowerCase();
-    if (currentEmail && currentProfile) {
-      storageService.saveInteractedUser(currentEmail, currentProfile.id || currentProfile.email, 'passed');
+    if (currentEmail && target) {
+      if (target.email) storageService.saveInteractedUser(currentEmail, target.email, 'passed');
+      if (target.id) storageService.saveInteractedUser(currentEmail, target.id, 'passed');
     }
 
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
       Animated.timing(slideAnim, { toValue: -50, duration: 150, useNativeDriver: true }),
     ]).start(() => {
-      setProfiles(prev => prev.filter(p => p.id !== currentProfile.id));
+      setProfiles(prev => prev.filter(p => p.id !== target.id && p.email !== target.email));
       slideAnim.setValue(50);
       Animated.parallel([
         Animated.timing(fadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
@@ -239,19 +244,21 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
     });
   };
 
-  const handleLike = (targetProfile = currentProfile) => {
+  const handleLike = async (targetProfile = currentProfile) => {
     if (!targetProfile) return;
+    const target = targetProfile;
     voiceService.stopPlayback();
     Speech.stop();
     setIsPlayingAudio(false);
 
     const currentUser = authService.getCurrentUser();
     const currentEmail = (currentUser?.email || '').toLowerCase();
-    if (currentEmail && targetProfile) {
-      storageService.saveInteractedUser(currentEmail, targetProfile.id || targetProfile.email, 'liked');
+    if (currentEmail && target) {
+      if (target.email) storageService.saveInteractedUser(currentEmail, target.email, 'liked');
+      if (target.id) storageService.saveInteractedUser(currentEmail, target.id, 'liked');
     }
 
-    setMatchedModalUser(targetProfile);
+    setMatchedModalUser(target);
     modalScaleAnim.setValue(0.7);
     Animated.spring(modalScaleAnim, {
       toValue: 1,
@@ -260,7 +267,7 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
       useNativeDriver: true,
     }).start();
 
-    setProfiles(prev => prev.filter(p => p.id !== targetProfile.id));
+    setProfiles(prev => prev.filter(p => p.id !== target.id && p.email !== target.email));
   };
 
   const handleSuperLike = () => {

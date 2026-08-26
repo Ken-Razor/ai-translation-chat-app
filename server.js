@@ -745,6 +745,77 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(conversation));
     }
 
+    // 10b. Consolidated Conversations List Endpoint (Single Instant Query, 0 N+1 Lag)
+    if (pathname === '/api/chat/conversations' && method === 'GET') {
+      const myEmail = (parsedUrl.query.email || '').toLowerCase().trim();
+      if (!myEmail) {
+        res.writeHead(400);
+        return res.end(JSON.stringify({ error: 'Email query parameter required' }));
+      }
+      const users = getUsers().map(({ password: pw, ...u }) => u);
+      const allMsgs = getMessages(); // Decrypted in-memory with AES-256-GCM
+
+      const otherUsers = users.filter(u => (u.email || '').toLowerCase() !== myEmail);
+
+      const conversationList = otherUsers.map(u => {
+        const peerEmail = (u.email || '').toLowerCase();
+        const peerMsgs = allMsgs.filter(m => {
+          const s = (m.sender || m.senderEmail || '').toLowerCase();
+          const r = (m.recipient || m.recipientEmail || '').toLowerCase();
+          return (s === myEmail && r === peerEmail) || (s === peerEmail && r === myEmail);
+        });
+
+        // Chat only messages (exclude call signals and audio/video chunks)
+        const chatMsgs = peerMsgs.filter(m => {
+          const orig = m.originalText || m.text || '';
+          return !orig.includes('[CALL_') && !orig.includes('[AUDIO_CHUNK:') && !orig.includes('[VIDEO_FRAME:') && !orig.includes('[WEBRTC_');
+        });
+
+        let lastMsgText = u.bio || 'Tap to start conversation';
+        let timestamp = 'Active now';
+        let lastMsgTime = 0;
+        let unread = 0;
+
+        if (chatMsgs.length > 0) {
+          const lastMsg = chatMsgs[chatMsgs.length - 1];
+          lastMsgText = lastMsg.originalText || lastMsg.text || 'Photo / Voice Note';
+          if (lastMsg.timestamp) {
+            const d = new Date(lastMsg.timestamp);
+            lastMsgTime = d.getTime() || 0;
+            timestamp = isNaN(d.getTime())
+              ? 'Recently'
+              : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          }
+          unread = chatMsgs.filter(m => (m.sender || m.senderEmail || '').toLowerCase() === peerEmail && m.status !== 'read').length;
+        }
+
+        return {
+          id: u.id || u.email,
+          email: u.email,
+          displayName: u.displayName || u.username || u.email.split('@')[0],
+          username: u.username ? (u.username.startsWith('@') ? u.username : `@${u.username}`) : '',
+          lastMessage: lastMsgText,
+          lastMsgTime: lastMsgTime,
+          timestamp: timestamp,
+          unread: unread,
+          nativeLang: u.nativeLanguage || 'English',
+          learningLang: u.learningLanguage || 'Japanese',
+          avatar: (u.avatar && u.avatar.startsWith('http'))
+            ? u.avatar
+            : (u.photoURL && u.photoURL.startsWith('http'))
+            ? u.photoURL
+            : `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || u.email)}&background=4B1A56&color=ffffff&size=256`,
+          online: true,
+        };
+      });
+
+      // Sort conversations so that recent chats appear at the top
+      conversationList.sort((a, b) => b.lastMsgTime - a.lastMsgTime);
+
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify(conversationList));
+    }
+
     // 11. Send Message (Stored Encrypted AES-256-GCM & Broadcast via WebSocket)
     if (pathname === '/api/chat/send' && method === 'POST') {
       const body = await readBody(req);
