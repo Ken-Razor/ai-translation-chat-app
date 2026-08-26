@@ -639,7 +639,7 @@ export default function SettingsScreen({
               <Text style={{ fontSize: 22, fontWeight: 'bold', color: theme.text }}>ViveTalk</Text>
               <Text style={{ fontSize: 13, color: theme.subtext, marginTop: 3 }}>Next-Gen AI Language Exchange Platform</Text>
               <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginTop: 8 }}>
-                <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '700' }}>Version 1.0.0 • Production Build</Text>
+                <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '700' }}>Version v.0.1 • Alpha Build</Text>
               </View>
             </View>
 
@@ -829,7 +829,7 @@ export default function SettingsScreen({
               </View>
               <View style={styles.waRowText}>
                 <Text style={[styles.waRowTitle, { color: theme.text }]}>About ViveTalk</Text>
-                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Dibuat oleh Ken Sanio • v1.0.0</Text>
+                <Text style={[styles.waRowSub, { color: theme.subtext }]}>Dibuat oleh Ken Sanio • v.0.1</Text>
               </View>
               <FontAwesome name="chevron-right" size={14} color={theme.subtext} />
             </TouchableOpacity>
@@ -848,7 +848,7 @@ export default function SettingsScreen({
           </View>
 
           <Text style={[styles.versionText, { color: theme.subtext }]}>
-            ViveTalk v1.0.0 • Dibuat oleh Ken Sanio • MIT License
+            ViveTalk v.0.1 • Dibuat oleh Ken Sanio • MIT License
           </Text>
         </ScrollView>
       )}
