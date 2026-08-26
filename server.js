@@ -775,10 +775,14 @@ const server = http.createServer(async (req, res) => {
         let timestamp = 'Active now';
         let lastMsgTime = 0;
         let unread = 0;
+        let lastMsgStatus = null;
+        let isLastMsgFromMe = false;
 
         if (chatMsgs.length > 0) {
           const lastMsg = chatMsgs[chatMsgs.length - 1];
           lastMsgText = lastMsg.originalText || lastMsg.text || 'Photo / Voice Note';
+          lastMsgStatus = lastMsg.status || 'sent';
+          isLastMsgFromMe = (lastMsg.sender || lastMsg.senderEmail || '').toLowerCase() === myEmail;
           if (lastMsg.timestamp) {
             const d = new Date(lastMsg.timestamp);
             lastMsgTime = d.getTime() || 0;
@@ -789,6 +793,8 @@ const server = http.createServer(async (req, res) => {
           unread = chatMsgs.filter(m => (m.sender || m.senderEmail || '').toLowerCase() === peerEmail && m.status !== 'read').length;
         }
 
+        const isPeerOnline = wsClients.has(peerEmail) && wsClients.get(peerEmail).size > 0;
+
         return {
           id: u.id || u.email,
           email: u.email,
@@ -796,6 +802,8 @@ const server = http.createServer(async (req, res) => {
           username: u.username ? (u.username.startsWith('@') ? u.username : `@${u.username}`) : '',
           lastMessage: lastMsgText,
           lastMsgTime: lastMsgTime,
+          lastMsgStatus: lastMsgStatus,
+          isLastMsgFromMe: isLastMsgFromMe,
           timestamp: timestamp,
           unread: unread,
           nativeLang: u.nativeLanguage || 'English',
@@ -805,7 +813,7 @@ const server = http.createServer(async (req, res) => {
             : (u.photoURL && u.photoURL.startsWith('http'))
             ? u.photoURL
             : `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || u.email)}&background=4B1A56&color=ffffff&size=256`,
-          online: true,
+          online: isPeerOnline,
         };
       });
 
@@ -838,6 +846,10 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      const recipientNorm = recipient.toLowerCase().trim();
+      const isRecipientConnected = recipientNorm && wsClients.has(recipientNorm) && wsClients.get(recipientNorm).size > 0;
+      const initialStatus = isRecipientConnected ? 'delivered' : 'sent';
+
       const newMsg = {
         id: 'msg_' + Date.now(),
         sender: sender,
@@ -856,7 +868,7 @@ const server = http.createServer(async (req, res) => {
         pinyin: pinyin || '',
         culturalNote: culturalNote || null,
         timestamp: new Date().toISOString(),
-        status: 'sent'
+        status: initialStatus
       };
       allMsgs.push(newMsg);
       saveMessages(allMsgs); // Encrypted at Rest with AES-256-GCM!
@@ -886,7 +898,39 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ success: true, rewritten }));
     }
 
+    // 14. Mark Messages Read & Broadcast Read Receipts
     if (pathname === '/api/chat/read' && method === 'POST') {
+      const body = await readBody(req);
+      const userEmail = (body.userEmail || '').toLowerCase().trim();
+      const partnerEmail = (body.partnerEmail || '').toLowerCase().trim();
+
+      if (userEmail && partnerEmail) {
+        const allMsgs = getMessages();
+        let changed = false;
+        allMsgs.forEach(m => {
+          const s = (m.sender || m.senderEmail || '').toLowerCase().trim();
+          const r = (m.recipient || m.recipientEmail || '').toLowerCase().trim();
+          if (s === partnerEmail && r === userEmail && m.status !== 'read') {
+            m.status = 'read';
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          saveMessages(allMsgs);
+          const readPayload = JSON.stringify({
+            type: 'messages_read',
+            reader: userEmail,
+            partner: partnerEmail
+          });
+          if (wsClients.has(partnerEmail)) {
+            wsClients.get(partnerEmail).forEach(client => {
+              if (client.readyState === 1) client.send(readPayload);
+            });
+          }
+        }
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       return res.end(JSON.stringify({ success: true }));
     }
@@ -981,6 +1025,36 @@ wss.on('connection', (ws, req) => {
     }
     wsClients.get(email).add(ws);
     console.log(`🔌 [WS CONNECTED] User: ${email} (Active sockets: ${wsClients.get(email).size})`);
+
+    // Upgrade any 'sent' messages waiting for this newly connected user to 'delivered'
+    const allMsgs = getMessages();
+    let deliveredChanged = false;
+    const sendersToNotify = new Set();
+
+    allMsgs.forEach(m => {
+      const r = (m.recipient || m.recipientEmail || '').toLowerCase().trim();
+      const s = (m.sender || m.senderEmail || '').toLowerCase().trim();
+      if (r === email && m.status === 'sent') {
+        m.status = 'delivered';
+        deliveredChanged = true;
+        sendersToNotify.add(s);
+      }
+    });
+
+    if (deliveredChanged) {
+      saveMessages(allMsgs);
+      sendersToNotify.forEach(senderEmail => {
+        if (wsClients.has(senderEmail)) {
+          const deliveredPayload = JSON.stringify({
+            type: 'messages_delivered',
+            recipient: email
+          });
+          wsClients.get(senderEmail).forEach(client => {
+            if (client.readyState === 1) client.send(deliveredPayload);
+          });
+        }
+      });
+    }
   }
 
   ws.on('message', (data) => {
@@ -988,6 +1062,35 @@ wss.on('connection', (ws, req) => {
       const msgObj = JSON.parse(data.toString());
       if (msgObj.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
+      }
+      if (msgObj.type === 'mark_read') {
+        const userEmail = (msgObj.userEmail || '').toLowerCase().trim();
+        const partnerEmail = (msgObj.partnerEmail || '').toLowerCase().trim();
+        if (userEmail && partnerEmail) {
+          const allMsgs = getMessages();
+          let changed = false;
+          allMsgs.forEach(m => {
+            const s = (m.sender || m.senderEmail || '').toLowerCase().trim();
+            const r = (m.recipient || m.recipientEmail || '').toLowerCase().trim();
+            if (s === partnerEmail && r === userEmail && m.status !== 'read') {
+              m.status = 'read';
+              changed = true;
+            }
+          });
+          if (changed) {
+            saveMessages(allMsgs);
+            const readPayload = JSON.stringify({
+              type: 'messages_read',
+              reader: userEmail,
+              partner: partnerEmail
+            });
+            if (wsClients.has(partnerEmail)) {
+              wsClients.get(partnerEmail).forEach(c => {
+                if (c.readyState === 1) c.send(readPayload);
+              });
+            }
+          }
+        }
       }
     } catch (e) {}
   });

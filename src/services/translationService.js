@@ -245,9 +245,13 @@ export async function sendPeerMessage(
   culturalNote = null
 ) {
   try {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 6000) : null;
+
     const res = await fetch(`${getApiBaseUrl()}/chat/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller?.signal,
       body: JSON.stringify({
         senderEmail,
         senderName,
@@ -261,6 +265,8 @@ export async function sendPeerMessage(
         culturalNote: culturalNote || null
       }),
     });
+
+    if (timeoutId) clearTimeout(timeoutId);
 
     const data = await res.json();
     if (!res.ok) {

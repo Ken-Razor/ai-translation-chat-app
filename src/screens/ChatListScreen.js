@@ -221,6 +221,25 @@ export default function ChatListScreen({
                 </View>
 
                 <View style={styles.lastMsgRow}>
+                  {item.isLastMsgFromMe && (
+                    <View style={{ marginRight: 4, flexDirection: 'row', alignItems: 'center' }}>
+                      {(item.lastMsgStatus === 'pending' || item.lastMsgStatus === 'sending' || item.lastMsgStatus === 'offline') ? (
+                        <FontAwesome name="clock-o" size={11} color="#9CA3AF" />
+                      ) : item.lastMsgStatus === 'sent' ? (
+                        <FontAwesome name="check" size={11} color="#9CA3AF" />
+                      ) : item.lastMsgStatus === 'delivered' ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <FontAwesome name="check" size={11} color="#9CA3AF" style={{ marginRight: -4 }} />
+                          <FontAwesome name="check" size={11} color="#9CA3AF" />
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <FontAwesome name="check" size={11} color="#34B7F1" style={{ marginRight: -4 }} />
+                          <FontAwesome name="check" size={11} color="#34B7F1" />
+                        </View>
+                      )}
+                    </View>
+                  )}
                   <Text style={[styles.lastMsgText, item.unread > 0 && styles.lastMsgUnread]} numberOfLines={1}>
                     {item.lastMessage}
                   </Text>

@@ -214,8 +214,25 @@ export default function MessageBubble({
         <Text style={styles.timestampText}>{formattedTime}</Text>
         {isUser && (
           <View style={styles.statusTicks}>
-            <FontAwesome name="check" size={11} color="#4B1A56" style={{ marginRight: -4 }} />
-            <FontAwesome name="check" size={11} color="#4B1A56" />
+            {(message.status === 'pending' || message.status === 'sending' || message.status === 'offline') ? (
+              /* No internet / pending / sending -> Timer clock icon like WhatsApp */
+              <FontAwesome name="clock-o" size={11} color="#9CA3AF" />
+            ) : message.status === 'sent' ? (
+              /* Sent to server but partner offline / app off -> Single gray check */
+              <FontAwesome name="check" size={11} color="#9CA3AF" />
+            ) : message.status === 'delivered' ? (
+              /* Delivered to partner device but unread -> Double gray checks */
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FontAwesome name="check" size={11} color="#9CA3AF" style={{ marginRight: -4 }} />
+                <FontAwesome name="check" size={11} color="#9CA3AF" />
+              </View>
+            ) : (
+              /* Read / Seen by partner -> Double vibrant blue checks */
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FontAwesome name="check" size={11} color="#34B7F1" style={{ marginRight: -4 }} />
+                <FontAwesome name="check" size={11} color="#34B7F1" />
+              </View>
+            )}
           </View>
         )}
       </View>

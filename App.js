@@ -330,6 +330,40 @@ export default function App() {
                 }
               }
 
+              // Handle Read Receipts (Turn double ticks to blue in real-time)
+              if (data.type === 'messages_read') {
+                const reader = (data.reader || '').toLowerCase();
+                const activePartner = (partnerEmail || '').toLowerCase();
+                if (reader === activePartner) {
+                  setMessages(prev => {
+                    const updated = prev.map(m =>
+                      m.sender === 'user' ? { ...m, status: 'read' } : m
+                    );
+                    if (currentUser?.email && partnerEmail) {
+                      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                    }
+                    return updated;
+                  });
+                }
+              }
+
+              // Handle Delivery Confirmation (Turn single tick to double gray tick)
+              if (data.type === 'messages_delivered') {
+                const rec = (data.recipient || '').toLowerCase();
+                const activePartner = (partnerEmail || '').toLowerCase();
+                if (rec === activePartner) {
+                  setMessages(prev => {
+                    const updated = prev.map(m =>
+                      m.sender === 'user' && m.status === 'sent' ? { ...m, status: 'delivered' } : m
+                    );
+                    if (currentUser?.email && partnerEmail) {
+                      storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+                    }
+                    return updated;
+                  });
+                }
+              }
+
               const isSignal = origText.includes('[CALL_') ||
                               origText.includes('[WEBRTC_') ||
                               origText.includes('[AUDIO_CHUNK:') ||
@@ -342,6 +376,12 @@ export default function App() {
                  (sender === activePartner && recipient === currentEmail))
               ) {
                 const isFriend = sender !== currentEmail;
+                const isCurrentlyInChat = activeView === 'chatRoom' && activePartner === sender;
+                if (isFriend && isCurrentlyInChat) {
+                  // Mark as read immediately on server
+                  markPeerMessagesRead(currentUser.email, partnerEmail);
+                }
+
                 const newMsgObj = {
                   id: m.id || `msg_${Date.now()}`,
                   sender: isFriend ? 'friend' : 'user',
@@ -351,7 +391,7 @@ export default function App() {
                   pinyin: m.pinyin || '',
                   culturalNote: m.culturalNote || null,
                   timestamp: m.timestamp || new Date().toISOString(),
-                  status: 'read',
+                  status: isFriend ? 'read' : (m.status || 'sent'),
                   isVoiceNote: !!m.audioUri || origText.includes('Voice Note'),
                   audioUri: m.audioUri || null,
                   imageUri: m.imageUri || null,
@@ -359,7 +399,11 @@ export default function App() {
                 };
 
                 setMessages(prev => {
-                  if (prev.some(existing => existing.id === newMsgObj.id)) return prev;
+                  if (prev.some(existing => existing.id === newMsgObj.id)) {
+                    return prev.map(existing =>
+                      existing.id === newMsgObj.id ? { ...existing, status: newMsgObj.status } : existing
+                    );
+                  }
                   const updated = [...prev, newMsgObj];
                   storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
                   return updated;
@@ -446,14 +490,17 @@ export default function App() {
       }
 
       const formatted = chatOnlyMsgs.map(m => {
+        const isFriend = (m.senderEmail || m.sender || '').toLowerCase() !== currentUser.email.toLowerCase();
+        const liveStatus = isFriend ? 'read' : (m.status || 'sent');
+
         const cacheKey = `${m.id}_${targetLang}_${selectedTone}`;
         if (messageTranslationCache.has(cacheKey)) {
-          return messageTranslationCache.get(cacheKey);
+          const cached = messageTranslationCache.get(cacheKey);
+          return { ...cached, status: liveStatus };
         }
 
         const cachedAudio = localAudioCache.get(m.id);
         const cachedImg = localImageCache.get(m.id);
-        const isFriend = m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase();
 
         let rawOrig = (m.originalText || '')
           .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
@@ -515,7 +562,7 @@ export default function App() {
             pinyin: '',          // BLANK so Pinyin box will NOT be shown for photos!
             culturalNote: null,   // NULL so Cultural note will NOT be shown for photos!
             timestamp: m.timestamp,
-            status: m.status || 'read',
+            status: liveStatus,
             isVoiceNote: isVoiceMsg,
             audioUri: voiceDataUri,
             imageUri: imageDataUri,
@@ -538,7 +585,7 @@ export default function App() {
           pinyin: finalPinyin,
           culturalNote: finalNote,
           timestamp: m.timestamp,
-          status: m.status || 'read',
+          status: liveStatus,
           isVoiceNote: false,
           audioUri: null,
           imageUri: null,
@@ -924,8 +971,8 @@ export default function App() {
       }
 
       if (sentMsg) {
-        setMessages(prev =>
-          prev.map(m =>
+        setMessages(prev => {
+          const updated = prev.map(m =>
             m.id === tempId
               ? {
                   ...m,
@@ -933,22 +980,27 @@ export default function App() {
                   translatedText: sentMsg.translatedText || (isVoiceOrImage ? '' : text),
                   pinyin: sentMsg.pinyin || '',
                   culturalNote: sentMsg.culturalNote || null,
-                  status: 'sent',
+                  status: sentMsg.status || 'sent',
                 }
               : m
-          )
-        );
-      }
-
-      setTimeout(() => {
-        if (sentMsg?.id) {
-          setMessages(prev =>
-            prev.map(m => (m.id === sentMsg.id ? { ...m, status: 'read' } : m))
           );
-        }
-      }, 1200);
+          if (currentUser?.email && partnerEmail) {
+            storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+          }
+          return updated;
+        });
+      }
     } catch (err) {
-      console.error('Failed to send peer message:', err);
+      console.warn('Network error while sending message:', err);
+      setMessages(prev => {
+        const updated = prev.map(m =>
+          m.id === tempId ? { ...m, status: 'pending' } : m
+        );
+        if (currentUser?.email && partnerEmail) {
+          storageService.saveLocalChatMessages(currentUser.email, partnerEmail, updated);
+        }
+        return updated;
+      });
     }
   };
 
