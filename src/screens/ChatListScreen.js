@@ -184,7 +184,7 @@ export default function ChatListScreen({
       ) : (
         <FlatList
           data={filteredChats}
-          keyExtractor={item => item.email}
+          keyExtractor={(item, idx) => item.email || item.id || `chat_${idx}`}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
@@ -199,7 +199,7 @@ export default function ChatListScreen({
                 <CachedImage
                   source={{ uri: item.avatar }}
                   style={styles.avatarImg}
-                  defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(item.displayName || item.email)}&background=4B1A56&color=ffffff` }}
+                  fallbackUri={`https://ui-avatars.com/api/?name=${encodeURIComponent(item.displayName || item.email || 'User')}&background=4B1A56&color=ffffff&size=256`}
                 />
                 <View style={styles.onlineDot} />
               </View>

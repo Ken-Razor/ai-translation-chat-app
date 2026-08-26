@@ -72,7 +72,7 @@ export default function Header({
               <CachedImage
                 source={{ uri: avatarUrl }}
                 style={styles.avatarImage}
-                defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayTitle)}&background=4B1A56&color=ffffff` }}
+                fallbackUri={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayTitle)}&background=4B1A56&color=ffffff&size=256`}
               />
             ) : (
               <View style={styles.avatarFallback}>

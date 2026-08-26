@@ -1,44 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { Image, Platform } from 'react-native';
-import { imageCacheService } from '../services/imageCacheService';
+import React, { useState } from 'react';
+import { Image } from 'react-native';
 
-export default function CachedImage({ source, style, defaultSource, ...props }) {
-  const remoteUri = typeof source === 'object' && source?.uri ? source.uri : (typeof source === 'string' ? source : null);
-  
-  const [imageUri, setImageUri] = useState(() => {
-    if (!remoteUri) return null;
-    const fastLocal = imageCacheService.getSyncLocalUri(remoteUri);
-    return fastLocal || remoteUri;
-  });
+export default function CachedImage({ source, style, fallbackUri, ...props }) {
+  const [hasError, setHasError] = useState(false);
 
-  useEffect(() => {
-    if (!remoteUri || Platform.OS === 'web' || !remoteUri.startsWith('http')) {
-      setImageUri(remoteUri);
-      return;
-    }
-
-    let isMounted = true;
-    imageCacheService.getCachedImageUri(remoteUri).then(cachedPath => {
-      if (isMounted && cachedPath && cachedPath !== imageUri) {
-        setImageUri(cachedPath);
-      }
-    }).catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
-  }, [remoteUri]);
-
-  if (!imageUri) {
-    return <Image source={defaultSource || { uri: 'https://ui-avatars.com/api/?name=User&background=4B1A56&color=ffffff' }} style={style} {...props} />;
+  let rawUri = null;
+  if (typeof source === 'object' && source?.uri) {
+    rawUri = source.uri;
+  } else if (typeof source === 'string') {
+    rawUri = source;
   }
+
+  const cleanUri = (rawUri && rawUri.trim().length > 0 && !hasError)
+    ? rawUri.trim()
+    : (fallbackUri || 'https://ui-avatars.com/api/?name=User&background=4B1A56&color=ffffff&size=256');
+
+  // Strip invalid defaultSource if passed to prevent Android Fresco native crashes
+  const { defaultSource, ...safeProps } = props;
 
   return (
     <Image
-      source={{ uri: imageUri }}
+      source={{ uri: cleanUri }}
       style={style}
-      defaultSource={defaultSource}
-      {...props}
+      onError={() => {
+        if (!hasError) setHasError(true);
+      }}
+      {...safeProps}
     />
   );
 }

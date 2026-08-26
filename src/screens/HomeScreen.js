@@ -278,7 +278,7 @@ export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser 
                   <CachedImage
                     source={{ uri: mAvatar }}
                     style={styles.matchAvatar}
-                    defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(mName)}&background=4B1A56&color=ffffff` }}
+                    fallbackUri={`https://ui-avatars.com/api/?name=${encodeURIComponent(mName)}&background=4B1A56&color=ffffff&size=256`}
                   />
 
                   <View style={styles.matchInfo}>

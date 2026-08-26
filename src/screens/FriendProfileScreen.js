@@ -193,7 +193,7 @@ export default function FriendProfileScreen({
             <CachedImage
               source={{ uri: avatar }}
               style={styles.heroAvatarImg}
-              defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=4B1A56&color=ffffff` }}
+              fallbackUri={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=4B1A56&color=ffffff&size=256`}
             />
             <View style={styles.previewBadgeCircle}>
               <FontAwesome name="search-plus" size={12} color="#FFFFFF" />

@@ -383,7 +383,7 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
                   <CachedImage
                     source={{ uri: currentProfile.photo }}
                     style={styles.profilePhoto}
-                    defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(currentProfile.name)}&background=4B1A56&color=ffffff` }}
+                    fallbackUri={`https://ui-avatars.com/api/?name=${encodeURIComponent(currentProfile.name)}&background=4B1A56&color=ffffff&size=256`}
                   />
 
                   <LinearGradient

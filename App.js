@@ -506,19 +506,9 @@ export default function App() {
             return voiceOrImgMsg;
           }
 
-          let finalTranslation = rawTrans;
-          let finalPinyin = m.pinyin;
-          let finalNote = m.culturalNote;
-
-          // Always translate using Google Gemini AI Engine to match chosen targetLang!
-          if (rawOrig) {
-            const aiRes = await translateWithGemini(rawOrig, 'auto', targetLang, selectedTone);
-            if (aiRes && aiRes.translatedText) {
-              finalTranslation = aiRes.translatedText;
-              finalPinyin = aiRes.pinyin;
-              finalNote = aiRes.culturalNote;
-            }
-          }
+          let finalTranslation = rawTrans || m.translatedText || rawOrig;
+          let finalPinyin = m.pinyin || '';
+          let finalNote = m.culturalNote || null;
 
           const parsedMsg = {
             id: m.id,
