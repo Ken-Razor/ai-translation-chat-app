@@ -48,6 +48,7 @@ import { MotionView, AnimatePresence, EASE_CINEMATIC } from './src/components/mo
 
 import { authService } from './src/services/authService';
 import { storageService } from './src/services/storageService';
+import { imageCacheService } from './src/services/imageCacheService';
 import {
   sendMessageToPeer,
   fetchPeerMessages,
@@ -153,6 +154,7 @@ export default function App() {
       setCurrentUser(user);
       if (user) {
         setAppStage('home');
+        storageService.prewarmUserCache(user.email);
       } else {
         isFirstCallPollRef.current = true;
         setAppStage('landing');
@@ -165,6 +167,7 @@ export default function App() {
         if (user) {
           setCurrentUser(user);
           setAppStage('home');
+          storageService.prewarmUserCache(user.email);
         } else {
           setAppStage('landing');
         }
@@ -380,6 +383,7 @@ export default function App() {
       if (freshUsers && freshUsers.length > 0) {
         userListCacheRef.current = freshUsers;
         setAllUsers(freshUsers);
+        imageCacheService.preloadUserAvatars(freshUsers);
       }
     }).catch(() => {});
   }, [currentUser, activeTab]);

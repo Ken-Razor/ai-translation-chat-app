@@ -16,6 +16,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
 import { voiceService } from '../services/voiceService';
+import CachedImage from '../components/CachedImage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -189,7 +190,11 @@ export default function FriendProfileScreen({
             onPress={() => onViewImage && onViewImage(avatar)}
             activeOpacity={0.85}
           >
-            <Image source={{ uri: avatar }} style={styles.heroAvatarImg} />
+            <CachedImage
+              source={{ uri: avatar }}
+              style={styles.heroAvatarImg}
+              defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=4B1A56&color=ffffff` }}
+            />
             <View style={styles.previewBadgeCircle}>
               <FontAwesome name="search-plus" size={12} color="#FFFFFF" />
             </View>
@@ -343,7 +348,7 @@ export default function FriendProfileScreen({
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaRow}>
               {sharedMedia.map((m, idx) => (
                 <TouchableOpacity key={idx} onPress={() => onViewImage && onViewImage(m.imageUri)} activeOpacity={0.8}>
-                  <Image source={{ uri: m.imageUri }} style={styles.sharedImgThumb} />
+                  <CachedImage source={{ uri: m.imageUri }} style={styles.sharedImgThumb} />
                 </TouchableOpacity>
               ))}
             </ScrollView>

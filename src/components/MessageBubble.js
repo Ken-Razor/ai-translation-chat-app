@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { voiceService } from '../services/voiceService';
+import CachedImage from './CachedImage';
 
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return '10:24 AM';
@@ -129,7 +130,7 @@ export default function MessageBubble({
         {/* Attached Photo/Media */}
         {hasImage && (
           <TouchableOpacity onPress={() => onViewImage && onViewImage(message.imageUri)} style={styles.imageWrapper} activeOpacity={0.9}>
-            <Image source={{ uri: message.imageUri }} style={styles.attachedImage} resizeMode="cover" />
+            <CachedImage source={{ uri: message.imageUri }} style={styles.attachedImage} resizeMode="cover" />
           </TouchableOpacity>
         )}
 

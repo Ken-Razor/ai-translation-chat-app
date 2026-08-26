@@ -21,6 +21,8 @@ import * as Speech from 'expo-speech';
 import { voiceService } from '../services/voiceService';
 import { authService } from '../services/authService';
 import { storageService } from '../services/storageService';
+import { imageCacheService } from '../services/imageCacheService';
+import CachedImage from '../components/CachedImage';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -153,6 +155,7 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
 
       setProfiles(formattedProfiles);
       setCurrentIndex(0);
+      imageCacheService.preloadUserAvatars(formattedProfiles);
     } catch (err) {
       console.warn('Failed to load registered users for matches:', err);
     } finally {
@@ -377,7 +380,11 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
               >
                 {/* 1. Photo Showcase with embedded voice pill */}
                 <View style={styles.photoContainer}>
-                  <Image source={{ uri: currentProfile.photo }} style={styles.profilePhoto} />
+                  <CachedImage
+                    source={{ uri: currentProfile.photo }}
+                    style={styles.profilePhoto}
+                    defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(currentProfile.name)}&background=4B1A56&color=ffffff` }}
+                  />
 
                   <LinearGradient
                     colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.7)']}
@@ -527,7 +534,7 @@ export default function MatchesScreen({ onStartChatWithPartner }) {
 
             {/* Avatars Collision */}
             <View style={styles.matchAvatarRow}>
-              <Image
+              <CachedImage
                 source={{ uri: matchedModalUser?.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400' }}
                 style={styles.matchUserImg}
               />

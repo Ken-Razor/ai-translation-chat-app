@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
+import CachedImage from './CachedImage';
 
 const LANGUAGE_META = [
   { id: 'zh', name: 'Chinese', flag: '🇨🇳', aliases: ['zh', 'chinese', 'mandarin', 'zhongwen', '中文', 'cmn'] },
@@ -68,7 +69,11 @@ export default function Header({
         <TouchableOpacity style={styles.profileClickArea} onPress={onOpenFriendProfile} activeOpacity={0.75}>
           <View style={styles.avatarWrapper}>
             {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              <CachedImage
+                source={{ uri: avatarUrl }}
+                style={styles.avatarImage}
+                defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayTitle)}&background=4B1A56&color=ffffff` }}
+              />
             ) : (
               <View style={styles.avatarFallback}>
                 <Text style={styles.avatarText}>{initial}</Text>

@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
-  Image,
   ActivityIndicator,
   RefreshControl,
   Platform,
@@ -15,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
 import { storageService } from '../services/storageService';
 import { fetchConversationsList } from '../services/translationService';
+import { imageCacheService } from '../services/imageCacheService';
+import CachedImage from '../components/CachedImage';
 
 const LANGUAGE_META = [
   { id: 'zh', name: 'Chinese', flag: '🇨🇳', aliases: ['zh', 'chinese', 'mandarin', 'zhongwen', '中文', 'cmn'] },
@@ -67,9 +68,7 @@ export default function ChatListScreen({
   const myEmail = (currentUser?.email || '').toLowerCase();
 
   // ⚡ 0ms Synchronous In-Memory Preload
-  const initialCache = storageService.getSyncChatList(myEmail);
-  const [chatList, setChatList] = useState(initialCache);
-  const [loading, setLoading] = useState(initialCache.length === 0);
+  const [chatList, setChatList] = useState(() => storageService.getSyncChatList(myEmail));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -79,7 +78,7 @@ export default function ChatListScreen({
     storageService.getLocalChatList(myEmail).then(cached => {
       if (Array.isArray(cached) && cached.length > 0) {
         setChatList(cached);
-        setLoading(false);
+        imageCacheService.preloadUserAvatars(cached);
       }
     });
   }, [myEmail]);
@@ -101,11 +100,12 @@ export default function ChatListScreen({
         setChatList(enriched);
         // Persist locally for instant future offline loads
         storageService.saveLocalChatList(myEmail, enriched);
+        // Pre-cache all partner avatars in local storage
+        imageCacheService.preloadUserAvatars(enriched);
       }
     } catch (err) {
       console.warn('Failed to refresh conversation list:', err);
     } finally {
-      setLoading(false);
       setIsRefreshing(false);
     }
   }, [myEmail]);
@@ -166,13 +166,8 @@ export default function ChatListScreen({
         </View>
       </View>
 
-      {/* Chats List (Instant Local Rendering) */}
-      {loading && chatList.length === 0 ? (
-        <View style={styles.centerLoading}>
-          <ActivityIndicator size="small" color="#4B1A56" />
-          <Text style={styles.loadingText}>Syncing chats...</Text>
-        </View>
-      ) : filteredChats.length === 0 ? (
+      {/* Chats List (Instant Local Rendering - Zero Blocking Screens) */}
+      {filteredChats.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconCircle}>
             <FontAwesome name="comment-o" size={32} color="#4B1A56" />
@@ -199,9 +194,13 @@ export default function ChatListScreen({
               onPress={() => onSelectChat && onSelectChat(item.email)}
               activeOpacity={0.7}
             >
-              {/* Avatar & Online Dot */}
+              {/* Cached Avatar & Online Dot */}
               <View style={styles.avatarContainer}>
-                <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                <CachedImage
+                  source={{ uri: item.avatar }}
+                  style={styles.avatarImg}
+                  defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(item.displayName || item.email)}&background=4B1A56&color=ffffff` }}
+                />
                 <View style={styles.onlineDot} />
               </View>
 
@@ -410,18 +409,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Center Loading & Empty State
-  centerLoading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  loadingText: {
-    fontSize: 12.5,
-    color: '#80737d',
-    fontWeight: '600',
-  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',

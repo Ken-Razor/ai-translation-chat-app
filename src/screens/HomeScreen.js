@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
 import { authService } from '../services/authService';
 import { storageService } from '../services/storageService';
+import { imageCacheService } from '../services/imageCacheService';
+import CachedImage from '../components/CachedImage';
 
 const { width } = Dimensions.get('window');
 
@@ -81,6 +83,7 @@ export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser 
         if (myEmail) {
           storageService.saveHomeUsers(myEmail, others);
         }
+        imageCacheService.preloadUserAvatars(others);
       }
     } catch (err) {
       console.warn('Failed to load registered users for home:', err);
@@ -272,9 +275,10 @@ export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser 
                   })}
                   activeOpacity={0.7}
                 >
-                  <Image
+                  <CachedImage
                     source={{ uri: mAvatar }}
                     style={styles.matchAvatar}
+                    defaultSource={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(mName)}&background=4B1A56&color=ffffff` }}
                   />
 
                   <View style={styles.matchInfo}>

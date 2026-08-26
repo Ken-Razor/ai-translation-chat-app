@@ -13,8 +13,46 @@ const STORAGE_KEYS = {
 // High-speed In-Memory Synchronous RAM Cache (0ms Instant Access)
 const ramCache = new Map();
 
-// Local Device-Side AES-compatible string obfuscation and encryption
+// Pure JS Base64 Engine (Hermes-compatible, zero Node.js Buffer / btoa dependency)
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+
+function pureB64Encode(input) {
+  try {
+    const str = String(input);
+    let output = '';
+    for (let block = 0, charCode, idx = 0, map = B64_CHARS;
+         str.charAt(idx | 0) || (map = '=', idx % 1);
+         output += map.charAt(63 & block >> 8 - idx % 1 * 8)) {
+      charCode = str.charCodeAt(idx += 3/4);
+      if (charCode > 0xFF) return str;
+      block = block << 8 | charCode;
+    }
+    return output;
+  } catch (e) {
+    return String(input);
+  }
+}
+
+function pureB64Decode(input) {
+  try {
+    let str = String(input).replace(/[=]+$/, '');
+    if (str.length % 4 === 1) return input;
+    let output = '';
+    for (let bc = 0, bs, buffer, idx = 0;
+         buffer = str.charAt(idx++);
+         ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer,
+           bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0
+    ) {
+      buffer = B64_CHARS.indexOf(buffer);
+    }
+    return output;
+  } catch (e) {
+    return String(input);
+  }
+}
+
 const LOCAL_CIPHER_SALT = 0x5a;
+
 function encryptLocalString(str) {
   if (!str || typeof str !== 'string') return str;
   try {
@@ -23,9 +61,7 @@ function encryptLocalString(str) {
     for (let i = 0; i < encoded.length; i++) {
       output += String.fromCharCode(encoded.charCodeAt(i) ^ LOCAL_CIPHER_SALT);
     }
-    const b64 = (typeof btoa !== 'undefined')
-      ? btoa(output)
-      : Buffer.from(output, 'binary').toString('base64');
+    const b64 = pureB64Encode(output);
     return `enc:vvt:${b64}`;
   } catch (e) {
     return str;
@@ -36,9 +72,7 @@ function decryptLocalString(str) {
   if (!str || typeof str !== 'string' || !str.startsWith('enc:vvt:')) return str;
   try {
     const rawB64 = str.replace('enc:vvt:', '');
-    const binary = (typeof atob !== 'undefined')
-      ? atob(rawB64)
-      : Buffer.from(rawB64, 'base64').toString('binary');
+    const binary = pureB64Decode(rawB64);
     let output = '';
     for (let i = 0; i < binary.length; i++) {
       output += String.fromCharCode(binary.charCodeAt(i) ^ LOCAL_CIPHER_SALT);
@@ -65,7 +99,10 @@ class StorageService {
     try {
       const val = await AsyncStorage.getItem(key);
       if (val !== null && val !== undefined) {
-        return encrypted ? decryptLocalString(val) : val;
+        if (typeof val === 'string' && val.startsWith('enc:vvt:')) {
+          return decryptLocalString(val);
+        }
+        return val;
       }
     } catch (e) {
       console.warn(`⚠️ [StorageService] Error reading ${key}:`, e.message);
@@ -84,7 +121,14 @@ class StorageService {
       ramCache.set(key, parsed);
       return parsed;
     } catch (e) {
-      return null;
+      try {
+        const decrypted = decryptLocalString(raw);
+        const parsed = JSON.parse(decrypted);
+        ramCache.set(key, parsed);
+        return parsed;
+      } catch (e2) {
+        return null;
+      }
     }
   }
 
@@ -110,16 +154,29 @@ class StorageService {
   }
 
   async saveSession(user, token, refreshToken = '') {
-    if (user) await this.setItem(STORAGE_KEYS.USER_SESSION, user, true);
-    if (token) await this.setItem(STORAGE_KEYS.ACCESS_TOKEN, token, true);
-    if (refreshToken) await this.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken, true);
+    if (user) await this.setItem(STORAGE_KEYS.USER_SESSION, user, false);
+    if (token) await this.setItem(STORAGE_KEYS.ACCESS_TOKEN, token, false);
+    if (refreshToken) await this.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken, false);
   }
 
   async loadSession() {
-    const user = await this.getObject(STORAGE_KEYS.USER_SESSION, true);
-    const token = await this.getItem(STORAGE_KEYS.ACCESS_TOKEN, true);
-    const refreshToken = await this.getItem(STORAGE_KEYS.REFRESH_TOKEN, true);
+    const user = await this.getObject(STORAGE_KEYS.USER_SESSION, false);
+    const token = await this.getItem(STORAGE_KEYS.ACCESS_TOKEN, false);
+    const refreshToken = await this.getItem(STORAGE_KEYS.REFRESH_TOKEN, false);
     return { user, token, refreshToken };
+  }
+
+  // Prewarm all cached collections into RAM
+  async prewarmUserCache(userEmail) {
+    if (!userEmail) return;
+    const clean = userEmail.toLowerCase();
+    try {
+      await Promise.all([
+        this.getLocalChatList(clean),
+        this.getHomeUsers(clean),
+        this.getInteractedUsers(clean),
+      ]);
+    } catch (e) {}
   }
 
   // Local Chat History Storage (Encrypted on Device Storage)
