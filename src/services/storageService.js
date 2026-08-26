@@ -99,11 +99,14 @@ class StorageService {
     if (!userEmail) return;
     const clean = userEmail.toLowerCase();
     try {
-      await Promise.all([
+      const [list] = await Promise.all([
         this.getLocalChatList(clean),
         this.getHomeUsers(clean),
         this.getInteractedUsers(clean),
       ]);
+      if (Array.isArray(list) && list.length > 0) {
+        await Promise.all(list.map(c => c.email ? this.getLocalChatMessages(clean, c.email) : Promise.resolve()));
+      }
     } catch (e) {}
   }
 

@@ -91,6 +91,9 @@ export default function App() {
   const [activeView, setActiveView] = useState('chatList'); // 'chatList' | 'chatRoom'
   const [partnerEmail, setPartnerEmail] = useState('');
   const [messages, setMessages] = useState([]);
+  const reversedMessages = React.useMemo(() => {
+    return Array.isArray(messages) && messages.length > 0 ? [...messages].reverse() : [];
+  }, [messages]);
 
   const [inputText, setInputText] = useState('');
   const [selectedTone, setSelectedTone] = useState('casual');
@@ -394,12 +397,17 @@ export default function App() {
   useEffect(() => {
     if (!currentUser || !partnerEmail || activeView !== 'chatRoom') return;
 
-    // ⚡ Instant 0ms Offline Local Storage Load
-    storageService.getLocalChatMessages(currentUser.email, partnerEmail).then(localMsgs => {
-      if (localMsgs && localMsgs.length > 0) {
-        setMessages(localMsgs);
-      }
-    });
+    // ⚡ 0ms Synchronous In-Memory Load from RAM Cache
+    const syncMsgs = storageService.getSyncChatMessages(currentUser.email, partnerEmail);
+    if (Array.isArray(syncMsgs) && syncMsgs.length > 0) {
+      setMessages(syncMsgs);
+    } else {
+      storageService.getLocalChatMessages(currentUser.email, partnerEmail).then(localMsgs => {
+        if (Array.isArray(localMsgs) && localMsgs.length > 0) {
+          setMessages(localMsgs);
+        }
+      });
+    }
 
     const loadMessages = async () => {
       await markPeerMessagesRead(currentUser.email, partnerEmail);
@@ -421,114 +429,111 @@ export default function App() {
       });
 
       if (chatOnlyMsgs.length === 0) {
-        setMessages([]);
         return;
       }
 
-      const formatted = await Promise.all(
-        chatOnlyMsgs.map(async m => {
-          const cacheKey = `${m.id}_${targetLang}_${selectedTone}`;
-          if (messageTranslationCache.has(cacheKey)) {
-            return messageTranslationCache.get(cacheKey);
-          }
+      const formatted = chatOnlyMsgs.map(m => {
+        const cacheKey = `${m.id}_${targetLang}_${selectedTone}`;
+        if (messageTranslationCache.has(cacheKey)) {
+          return messageTranslationCache.get(cacheKey);
+        }
 
-          const cachedAudio = localAudioCache.get(m.id);
-          const cachedImg = localImageCache.get(m.id);
-          const isFriend = m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase();
+        const cachedAudio = localAudioCache.get(m.id);
+        const cachedImg = localImageCache.get(m.id);
+        const isFriend = m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase();
 
-          let rawOrig = (m.originalText || '')
-            .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
-            .replace(/\(收到！\)/gi, '')
-            .trim();
+        let rawOrig = (m.originalText || '')
+          .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
+          .replace(/\(收到！\)/gi, '')
+          .trim();
 
-          let rawTrans = (m.translatedText || '')
-            .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
-            .replace(/\(收到！\)/gi, '')
-            .trim();
+        let rawTrans = (m.translatedText || '')
+          .replace(/\[Golang AI[^\]]*\]:\s*/gi, '')
+          .replace(/\(收到！\)/gi, '')
+          .trim();
 
-          // Extract embedded voice note audio data if present (check both rawOrig and rawTrans)
-          let voiceDataUri = cachedAudio || m.audioUri || null;
-          const fullVoiceText = rawOrig + ' ' + rawTrans;
-          const voiceStart = fullVoiceText.indexOf('[VOICE_DATA:');
-          if (voiceStart >= 0) {
-            const voiceEnd = fullVoiceText.indexOf(']', voiceStart);
-            if (voiceEnd > voiceStart) {
-              const base64Audio = fullVoiceText.substring(voiceStart + '[VOICE_DATA:'.length, voiceEnd);
-              if (base64Audio.length > 50) {
-                voiceDataUri = `data:audio/mp4;base64,${base64Audio}`;
-                if (m.id) localAudioCache.set(m.id, voiceDataUri);
-              }
+        // Extract embedded voice note audio data if present (check both rawOrig and rawTrans)
+        let voiceDataUri = cachedAudio || m.audioUri || null;
+        const fullVoiceText = rawOrig + ' ' + rawTrans;
+        const voiceStart = fullVoiceText.indexOf('[VOICE_DATA:');
+        if (voiceStart >= 0) {
+          const voiceEnd = fullVoiceText.indexOf(']', voiceStart);
+          if (voiceEnd > voiceStart) {
+            const base64Audio = fullVoiceText.substring(voiceStart + '[VOICE_DATA:'.length, voiceEnd);
+            if (base64Audio.length > 50) {
+              voiceDataUri = `data:audio/mp4;base64,${base64Audio}`;
+              if (m.id) localAudioCache.set(m.id, voiceDataUri);
             }
           }
-          // Clean VOICE_DATA tags out of text strings completely
-          rawOrig = rawOrig.replace(/\[VOICE_DATA:[^\]]*\]?/gi, '').trim();
-          rawTrans = rawTrans.replace(/\[VOICE_DATA:[^\]]*\]?/gi, '').trim();
+        }
+        // Clean VOICE_DATA tags out of text strings completely
+        rawOrig = rawOrig.replace(/\[VOICE_DATA:[^\]]*\]?/gi, '').trim();
+        rawTrans = rawTrans.replace(/\[VOICE_DATA:[^\]]*\]?/gi, '').trim();
 
-          // Extract embedded image data if present (check both rawOrig and rawTrans)
-          let imageDataUri = cachedImg || m.imageUri || null;
-          const fullImgText = rawOrig + ' ' + rawTrans;
-          const imgStart = fullImgText.indexOf('[IMAGE_DATA:');
-          if (imgStart >= 0) {
-            const imgEnd = fullImgText.indexOf(']', imgStart);
-            if (imgEnd > imgStart) {
-              const base64Img = fullImgText.substring(imgStart + '[IMAGE_DATA:'.length, imgEnd);
-              if (base64Img.length > 50) {
-                imageDataUri = `data:image/jpeg;base64,${base64Img}`;
-                if (m.id) localImageCache.set(m.id, imageDataUri);
-              }
+        // Extract embedded image data if present (check both rawOrig and rawTrans)
+        let imageDataUri = cachedImg || m.imageUri || null;
+        const fullImgText = rawOrig + ' ' + rawTrans;
+        const imgStart = fullImgText.indexOf('[IMAGE_DATA:');
+        if (imgStart >= 0) {
+          const imgEnd = fullImgText.indexOf(']', imgStart);
+          if (imgEnd > imgStart) {
+            const base64Img = fullImgText.substring(imgStart + '[IMAGE_DATA:'.length, imgEnd);
+            if (base64Img.length > 50) {
+              imageDataUri = `data:image/jpeg;base64,${base64Img}`;
+              if (m.id) localImageCache.set(m.id, imageDataUri);
             }
           }
-          // Clean IMAGE_DATA tags out of text strings completely
-          rawOrig = rawOrig.replace(/\[IMAGE_DATA:[^\]]*\]?/gi, '').trim();
-          rawTrans = rawTrans.replace(/\[IMAGE_DATA:[^\]]*\]?/gi, '').trim();
+        }
+        // Clean IMAGE_DATA tags out of text strings completely
+        rawOrig = rawOrig.replace(/\[IMAGE_DATA:[^\]]*\]?/gi, '').trim();
+        rawTrans = rawTrans.replace(/\[IMAGE_DATA:[^\]]*\]?/gi, '').trim();
 
-          const isVoiceMsg = !!voiceDataUri || rawOrig.includes('Voice Note');
-          const isImageMsg = !!imageDataUri || rawOrig.includes('Photo') || rawOrig.includes('Gallery');
+        const isVoiceMsg = !!voiceDataUri || rawOrig.includes('Voice Note');
+        const isImageMsg = !!imageDataUri || rawOrig.includes('Photo') || rawOrig.includes('Gallery');
 
-          // FOR PHOTO AND VOICE MESSAGES: NO AI TRANSLATION, NO PINYIN, NO CULTURAL NOTES!
-          if (isVoiceMsg || isImageMsg) {
-            const voiceOrImgMsg = {
-              id: m.id,
-              sender: isFriend ? 'friend' : 'user',
-              senderName: m.senderName || m.senderEmail,
-              originalText: isImageMsg ? (imageDataUri ? '' : rawOrig) : '🎵 Voice Note',
-              translatedText: '',  // BLANK so AI translation box will NOT be shown for photos!
-              pinyin: '',          // BLANK so Pinyin box will NOT be shown for photos!
-              culturalNote: null,   // NULL so Cultural note will NOT be shown for photos!
-              timestamp: m.timestamp,
-              status: m.status || 'read',
-              isVoiceNote: isVoiceMsg,
-              audioUri: voiceDataUri,
-              imageUri: imageDataUri,
-              durationSecs: m.durationSecs || 3,
-            };
-            if (m.id) messageTranslationCache.set(cacheKey, voiceOrImgMsg);
-            return voiceOrImgMsg;
-          }
-
-          let finalTranslation = rawTrans || m.translatedText || rawOrig;
-          let finalPinyin = m.pinyin || '';
-          let finalNote = m.culturalNote || null;
-
-          const parsedMsg = {
+        // FOR PHOTO AND VOICE MESSAGES: NO AI TRANSLATION, NO PINYIN, NO CULTURAL NOTES!
+        if (isVoiceMsg || isImageMsg) {
+          const voiceOrImgMsg = {
             id: m.id,
             sender: isFriend ? 'friend' : 'user',
             senderName: m.senderName || m.senderEmail,
-            originalText: rawOrig,
-            translatedText: finalTranslation,
-            pinyin: finalPinyin,
-            culturalNote: finalNote,
+            originalText: isImageMsg ? (imageDataUri ? '' : rawOrig) : '🎵 Voice Note',
+            translatedText: '',  // BLANK so AI translation box will NOT be shown for photos!
+            pinyin: '',          // BLANK so Pinyin box will NOT be shown for photos!
+            culturalNote: null,   // NULL so Cultural note will NOT be shown for photos!
             timestamp: m.timestamp,
             status: m.status || 'read',
-            isVoiceNote: false,
-            audioUri: null,
-            imageUri: null,
-            durationSecs: 3,
+            isVoiceNote: isVoiceMsg,
+            audioUri: voiceDataUri,
+            imageUri: imageDataUri,
+            durationSecs: m.durationSecs || 3,
           };
-          if (m.id) messageTranslationCache.set(cacheKey, parsedMsg);
-          return parsedMsg;
-        })
-      );
+          if (m.id) messageTranslationCache.set(cacheKey, voiceOrImgMsg);
+          return voiceOrImgMsg;
+        }
+
+        let finalTranslation = rawTrans || m.translatedText || rawOrig;
+        let finalPinyin = m.pinyin || '';
+        let finalNote = m.culturalNote || null;
+
+        const parsedMsg = {
+          id: m.id,
+          sender: isFriend ? 'friend' : 'user',
+          senderName: m.senderName || m.senderEmail,
+          originalText: rawOrig,
+          translatedText: finalTranslation,
+          pinyin: finalPinyin,
+          culturalNote: finalNote,
+          timestamp: m.timestamp,
+          status: m.status || 'read',
+          isVoiceNote: false,
+          audioUri: null,
+          imageUri: null,
+          durationSecs: 3,
+        };
+        if (m.id) messageTranslationCache.set(cacheKey, parsedMsg);
+        return parsedMsg;
+      });
 
       // Deduplicate formatted messages by ID to guarantee unique React keys
       const seenIds = new Set();
@@ -560,32 +565,24 @@ export default function App() {
     loadMessages();
   }, [currentUser, activeView, partnerEmail, targetLang, selectedTone]);
 
-  // Smart Auto-Scroll Effect: Only scroll to end if user is at bottom or initial load!
-  useEffect(() => {
-    if (currentUser && activeView === 'chatRoom') {
-      if (isInitialLoadRef.current) {
-        flatListRef.current?.scrollToEnd({ animated: false });
-        isInitialLoadRef.current = false;
-      } else if (isAtBottomRef.current) {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }
-    }
-  }, [messages, currentUser, activeView]);
-
-
-
   const handleSelectChat = (email) => {
+    if (!email) return;
     isInitialLoadRef.current = true;
     isAtBottomRef.current = true;
     setPartnerEmail(email);
 
-    // ⚡ Instant 0ms Preload from Local Storage before slide animation
-    if (currentUser?.email && email) {
-      storageService.getLocalChatMessages(currentUser.email, email).then(localMsgs => {
-        if (Array.isArray(localMsgs) && localMsgs.length > 0) {
-          setMessages(localMsgs);
-        }
-      });
+    // ⚡ Instant 0ms Preload from Synchronous RAM Cache
+    if (currentUser?.email) {
+      const syncMsgs = storageService.getSyncChatMessages(currentUser.email, email);
+      if (Array.isArray(syncMsgs) && syncMsgs.length > 0) {
+        setMessages(syncMsgs);
+      } else {
+        storageService.getLocalChatMessages(currentUser.email, email).then(localMsgs => {
+          if (Array.isArray(localMsgs) && localMsgs.length > 0) {
+            setMessages(localMsgs);
+          }
+        });
+      }
     }
 
     // Dynamically set target translation language to partner's native or learning language
@@ -620,21 +617,16 @@ export default function App() {
     chatSlideAnim.setValue(0);
     Animated.timing(chatSlideAnim, {
       toValue: 1,
-      duration: 650,
+      duration: 320,
       easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        flatListRef.current?.scrollToEnd({ animated: false });
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 80);
-      }
-    });
+    }).start();
   };
 
   const handleBackToChatList = () => {
     Animated.timing(chatSlideAnim, {
       toValue: 0,
-      duration: 500,
+      duration: 300,
       easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
     }).start(({ finished }) => {
@@ -645,9 +637,8 @@ export default function App() {
   };
 
   const handleScroll = (event) => {
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    const distanceToBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    isAtBottomRef.current = distanceToBottom < 100;
+    const yOffset = event.nativeEvent?.contentOffset?.y || 0;
+    isAtBottomRef.current = yOffset <= 60;
   };
 
   const handleClearHistory = async () => {
@@ -897,7 +888,7 @@ export default function App() {
     };
 
     setMessages(prev => [...prev, initialMsg]);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
 
     try {
       const sentMsg = await sendMessageToPeer(
@@ -1258,28 +1249,22 @@ export default function App() {
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
             >
-              {/* Message Thread List */}
+              {/* Message Thread List (Native Inverted Bottom-Up Architecture) */}
               <FlatList
                 ref={flatListRef}
-                data={messages}
+                data={reversedMessages}
+                inverted={messages.length > 0}
                 keyExtractor={(item, index) => item.id ? `${item.id}_${index}` : `msg_${index}`}
                 contentContainerStyle={styles.messageList}
+                showsVerticalScrollIndicator={false}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
-                onContentSizeChange={() => {
-                  if (isInitialLoadRef.current) {
-                    flatListRef.current?.scrollToEnd({ animated: false });
-                  } else if (isAtBottomRef.current) {
-                    flatListRef.current?.scrollToEnd({ animated: true });
-                  }
-                }}
-                onLayout={() => {
-                  flatListRef.current?.scrollToEnd({ animated: false });
-                }}
-                ListHeaderComponent={
-                  <View style={styles.dateHeaderPill}>
-                    <Text style={styles.dateHeaderText}>Today, 10:24 AM</Text>
-                  </View>
+                ListFooterComponent={
+                  messages.length > 0 ? (
+                    <View style={styles.dateHeaderPill}>
+                      <Text style={styles.dateHeaderText}>Today, 10:24 AM</Text>
+                    </View>
+                  ) : null
                 }
                 ListEmptyComponent={
                   <View style={styles.emptyChatBox}>
@@ -1498,7 +1483,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messageList: {
+    flexGrow: 1,
     paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   emptyState: {
     padding: 30,
