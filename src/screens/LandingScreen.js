@@ -3,7 +3,6 @@ import {
   StyleSheet,
   Text,
   View,
-  TouchableOpacity,
   Dimensions,
   Platform,
 } from 'react-native';
@@ -115,8 +114,8 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
         style={styles.glowOrbTop}
         animate={{
           scale: [1, 1.15, 1],
-          x: [0, 20, 0],
-          y: [0, -15, 0],
+          x: [0, 15, 0],
+          y: [0, -10, 0],
         }}
         transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
       />
@@ -124,8 +123,8 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
         style={styles.glowOrbBottom}
         animate={{
           scale: [1.1, 1, 1.1],
-          x: [0, -25, 0],
-          y: [0, 20, 0],
+          x: [0, -15, 0],
+          y: [0, 15, 0],
         }}
         transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
       />
@@ -192,7 +191,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                   <View style={styles.mockChatBox}>
                     <MotionView
                       style={styles.mockBubbleUser}
-                      initial={{ opacity: 0, x: 35, scale: 0.9 }}
+                      initial={{ opacity: 0, x: 30, scale: 0.9 }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
                       transition={{ ...SPRING_BOUNCY, delay: 0.12 }}
                     >
@@ -201,7 +200,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
 
                     <MotionView
                       style={styles.mockBubblePartner}
-                      initial={{ opacity: 0, x: -35, scale: 0.9 }}
+                      initial={{ opacity: 0, x: -30, scale: 0.9 }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
                       transition={{ ...SPRING_BOUNCY, delay: 0.28 }}
                     >
@@ -259,7 +258,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
             <MotionButton
               style={styles.primaryButton}
               onPress={handleNext}
-              whileHover={{ scale: 1.025, boxShadow: '0 10px 24px rgba(50, 0, 52, 0.25)' }}
+              whileHover={{ scale: 1.025 }}
               whileTap={{ scale: 0.96 }}
             >
               <Text style={styles.primaryButtonText}>
@@ -320,21 +319,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -100,
     right: -80,
-    width: 320,
-    height: 320,
-    borderRadius: 160,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
     backgroundColor: 'rgba(253, 168, 237, 0.3)',
-    filter: Platform.OS === 'web' ? 'blur(60px)' : undefined,
   },
   glowOrbBottom: {
     position: 'absolute',
     bottom: -100,
     left: -80,
-    width: 320,
-    height: 320,
-    borderRadius: 160,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
     backgroundColor: 'rgba(216, 180, 254, 0.35)',
-    filter: Platform.OS === 'web' ? 'blur(60px)' : undefined,
   },
   topBar: {
     flexDirection: 'row',
@@ -346,13 +343,17 @@ const styles = StyleSheet.create({
   brandBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     borderWidth: 1,
     borderColor: 'rgba(50, 0, 52, 0.08)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   brandBadgeText: {
     fontSize: 14,
@@ -367,8 +368,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: 'rgba(50, 0, 52, 0.1)',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-    cursor: 'pointer',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   skipBtnText: {
     color: '#4F434C',
@@ -394,7 +398,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     borderWidth: 1,
     borderColor: 'rgba(50, 0, 52, 0.08)',
-    boxShadow: '0 12px 30px rgba(50, 0, 52, 0.08)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
   visualHeader: {
     flexDirection: 'row',
@@ -432,7 +440,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderBottomRightRadius: 4,
     maxWidth: '85%',
-    boxShadow: '0 4px 12px rgba(50, 0, 52, 0.15)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 2,
   },
   mockBubbleUserText: {
     color: '#FFFFFF',
@@ -514,10 +526,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#320034',
     paddingVertical: 16,
     borderRadius: 20,
-    boxShadow: '0 8px 20px rgba(50, 0, 52, 0.2)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
     marginBottom: 12,
-    cursor: 'pointer',
-    borderWidth: 0,
   },
   primaryButtonText: {
     color: '#FFFFFF',
@@ -528,9 +542,7 @@ const styles = StyleSheet.create({
   signInLinkBtn: {
     alignItems: 'center',
     paddingVertical: 8,
-    cursor: 'pointer',
     backgroundColor: 'transparent',
-    borderWidth: 0,
   },
   signInLinkText: {
     fontSize: 13,

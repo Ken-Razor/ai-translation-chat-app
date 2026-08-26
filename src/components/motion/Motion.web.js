@@ -4,12 +4,24 @@
  */
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { motion, AnimatePresence } from 'motion/react';
 
-export const MotionView = motion.div;
-export const MotionText = motion.span;
-export const MotionButton = motion.button;
-export const MotionImage = motion.img;
+export const MotionView = React.forwardRef(({ style, ...props }, ref) => (
+  <motion.div ref={ref} style={StyleSheet.flatten(style)} {...props} />
+));
+
+export const MotionText = React.forwardRef(({ style, ...props }, ref) => (
+  <motion.span ref={ref} style={StyleSheet.flatten(style)} {...props} />
+));
+
+export const MotionButton = React.forwardRef(({ style, ...props }, ref) => (
+  <motion.button ref={ref} style={StyleSheet.flatten(style)} {...props} />
+));
+
+export const MotionImage = React.forwardRef(({ style, ...props }, ref) => (
+  <motion.img ref={ref} style={StyleSheet.flatten(style)} {...props} />
+));
 
 export { motion, AnimatePresence };
 

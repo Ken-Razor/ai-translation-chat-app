@@ -4,24 +4,21 @@
  */
 
 import React, { useEffect } from 'react';
-import { StyleSheet, View, Text, Platform, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import {
   MotionView,
-  MotionText,
   SPRING_BOUNCY,
   SPRING_SMOOTH,
   FLOAT_LOOP,
 } from '../components/motion/Motion';
-
-const { width } = Dimensions.get('window');
 
 export default function SplashScreen({ onFinish }) {
   useEffect(() => {
     // Keep splash visible for at least 1.8s for a polished brand impression
     const timer = setTimeout(() => {
       if (onFinish) onFinish();
-    }, 2200);
+    }, 2000);
 
     return () => clearTimeout(timer);
   }, [onFinish]);
@@ -33,19 +30,19 @@ export default function SplashScreen({ onFinish }) {
         style={styles.ambientGlow1}
         animate={{
           scale: [1, 1.25, 1],
-          opacity: [0.4, 0.7, 0.4],
-          x: [-20, 20, -20],
+          opacity: [0.35, 0.65, 0.35],
+          x: [-15, 15, -15],
         }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
       />
       <MotionView
         style={styles.ambientGlow2}
         animate={{
           scale: [1.2, 1, 1.2],
           opacity: [0.3, 0.6, 0.3],
-          y: [20, -20, 20],
+          y: [15, -15, 15],
         }}
-        transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <View style={styles.contentWrapper}>
@@ -55,24 +52,11 @@ export default function SplashScreen({ onFinish }) {
           <MotionView
             style={styles.pulseRing}
             animate={{
-              scale: [1, 1.7, 2.2],
-              opacity: [0.7, 0.25, 0],
+              scale: [1, 1.6, 2.1],
+              opacity: [0.7, 0.2, 0],
             }}
             transition={{
-              duration: 2.4,
-              repeat: Infinity,
-              ease: 'easeOut',
-            }}
-          />
-          <MotionView
-            style={[styles.pulseRing, { animationDelay: '0.8s' }]}
-            animate={{
-              scale: [1, 1.5, 2.0],
-              opacity: [0.6, 0.2, 0],
-            }}
-            transition={{
-              duration: 2.4,
-              delay: 0.8,
+              duration: 2.2,
               repeat: Infinity,
               ease: 'easeOut',
             }}
@@ -81,27 +65,27 @@ export default function SplashScreen({ onFinish }) {
           {/* Core Logo Capsule */}
           <MotionView
             style={styles.logoBadge}
-            initial={{ scale: 0.4, opacity: 0, rotate: -15 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
             transition={SPRING_BOUNCY}
             {...FLOAT_LOOP(4, 3)}
           >
             <FontAwesome name="globe" size={44} color="#FFFFFF" />
             <MotionView
               style={styles.sparkleDot}
-              animate={{ scale: [1, 1.4, 1], opacity: [0.7, 1, 0.7] }}
+              animate={{ scale: [1, 1.3, 1], opacity: [0.7, 1, 0.7] }}
               transition={{ duration: 1.5, repeat: Infinity }}
             >
-              <FontAwesome name="bolt" size={14} color="#FBBF24" />
+              <FontAwesome name="bolt" size={13} color="#FBBF24" />
             </MotionView>
           </MotionView>
         </View>
 
         {/* Brand Typography */}
         <MotionView
-          initial={{ opacity: 0, y: 28 }}
+          initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.25 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.2 }}
           style={styles.textSection}
         >
           <Text style={styles.brandTitle}>ViveTalk</Text>
@@ -113,15 +97,15 @@ export default function SplashScreen({ onFinish }) {
           style={styles.progressCapsule}
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.45 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.4 }}
         >
           <MotionView
             style={styles.progressBarFill}
             animate={{
-              x: ['-100%', '100%'],
+              x: [-50, 50, -50],
             }}
             transition={{
-              duration: 1.4,
+              duration: 1.6,
               repeat: Infinity,
               ease: 'easeInOut',
             }}
@@ -131,9 +115,9 @@ export default function SplashScreen({ onFinish }) {
         {/* Feature Pills */}
         <MotionView
           style={styles.featurePillsRow}
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.6 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.55 }}
         >
           <View style={styles.featurePill}>
             <FontAwesome name="lock" size={11} color="#6B21A8" style={{ marginRight: 5 }} />
@@ -155,7 +139,7 @@ export default function SplashScreen({ onFinish }) {
         style={styles.footer}
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.7 }}
-        transition={{ delay: 0.8, duration: 0.6 }}
+        transition={{ delay: 0.7, duration: 0.5 }}
       >
         <Text style={styles.footerText}>Sayflash AI Studio • Ultra-Low Latency</Text>
       </MotionView>
@@ -176,21 +160,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '15%',
     left: '10%',
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: 'rgba(216, 180, 254, 0.45)', // Soft purple
-    filter: Platform.OS === 'web' ? 'blur(70px)' : undefined,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(216, 180, 254, 0.45)',
   },
   ambientGlow2: {
     position: 'absolute',
     bottom: '20%',
     right: '10%',
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(251, 207, 232, 0.45)', // Soft pink
-    filter: Platform.OS === 'web' ? 'blur(70px)' : undefined,
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: 'rgba(251, 207, 232, 0.45)',
   },
   contentWrapper: {
     alignItems: 'center',
@@ -203,7 +185,7 @@ const styles = StyleSheet.create({
     height: 120,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 26,
   },
   pulseRing: {
     position: 'absolute',
@@ -221,7 +203,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#320034',
     justifyContent: 'center',
     alignItems: 'center',
-    boxShadow: '0 16px 36px rgba(50, 0, 52, 0.28)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    elevation: 8,
     position: 'relative',
   },
   sparkleDot: {
@@ -234,11 +220,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   textSection: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 30,
   },
   brandTitle: {
     fontSize: 34,
@@ -261,14 +251,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(50, 0, 52, 0.1)',
     overflow: 'hidden',
     position: 'relative',
-    marginBottom: 36,
+    marginBottom: 32,
   },
   progressBarFill: {
     position: 'absolute',
-    left: 0,
+    left: '25%',
     top: 0,
     bottom: 0,
-    width: '45%',
+    width: '50%',
     backgroundColor: '#7E22CE',
     borderRadius: 3,
   },
@@ -286,7 +276,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   featurePillText: {
     fontSize: 11,
@@ -295,7 +289,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     position: 'absolute',
-    bottom: 28,
+    bottom: 26,
     zIndex: 10,
   },
   footerText: {

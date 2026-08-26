@@ -470,6 +470,8 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
   const topPadding = (insets.top > 0 ? insets.top : (Platform.OS === 'ios' ? 48 : 20)) + 6;
   const bottomPadding = (insets.bottom > 0 ? insets.bottom : 20) + 6;
 
+  const progressPercentage = `${Math.round((signUpStep / 7) * 100)}%`;
+
   return (
     <View style={styles.rootBackground}>
       {/* Soft Ambient Animated Orbs */}
@@ -499,7 +501,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
             <AnimatePresence mode="wait">
               {authMode === 'signin' ? (
                 /* ========================================================
-                   SIGN IN SCREEN (WITH MOTION ANIMATIONS)
+                   SIGN IN SCREEN
                 ======================================================== */
                 <MotionView
                   key="signin"
@@ -593,12 +595,12 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                       </View>
                     </View>
 
-                    {/* Primary Button with Motion hover/tap */}
+                    {/* Primary Button */}
                     <MotionButton
                       style={[styles.primaryBtn, loading && styles.btnDisabled]}
                       onPress={handleSignIn}
                       disabled={loading}
-                      whileHover={{ scale: 1.02, boxShadow: '0 8px 20px rgba(50, 0, 52, 0.25)' }}
+                      whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.96 }}
                     >
                       {loading ? (
@@ -654,7 +656,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                 </MotionView>
               ) : (
                 /* ========================================================
-                   MULTI-STEP SIGN UP WIZARD (7 MOTION STEPS)
+                   MULTI-STEP SIGN UP WIZARD (7 STEPS)
                 ======================================================== */
                 <MotionView
                   key="signup"
@@ -684,13 +686,9 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                     </MotionView>
                   </View>
 
-                  {/* Visual Step Progress Bar with Dynamic Motion Width */}
+                  {/* Visual Step Progress Bar */}
                   <View style={styles.progressBarBg}>
-                    <MotionView
-                      style={styles.progressBarFill}
-                      animate={{ width: `${(signUpStep / 7) * 100}%` }}
-                      transition={SPRING_SMOOTH}
-                    />
+                    <View style={[styles.progressBarFill, { width: progressPercentage }]} />
                   </View>
 
                   {/* Error Banner */}
@@ -1264,8 +1262,8 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                           <View style={styles.stepTitleBox}>
                             <MotionView
                               style={styles.otpIconBadge}
-                              animate={{ scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] }}
-                              transition={{ duration: 3, repeat: Infinity }}
+                              animate={{ scale: [1, 1.1, 1] }}
+                              transition={{ duration: 2, repeat: Infinity }}
                             >
                               <FontAwesome name="envelope-open-o" size={26} color="#320034" />
                             </MotionView>
@@ -1370,7 +1368,6 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
     backgroundColor: 'rgba(255, 215, 243, 0.4)',
-    filter: Platform.OS === 'web' ? 'blur(60px)' : undefined,
   },
   glowOrbBottom: {
     position: 'absolute',
@@ -1380,7 +1377,6 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
     backgroundColor: 'rgba(216, 180, 254, 0.4)',
-    filter: Platform.OS === 'web' ? 'blur(60px)' : undefined,
   },
 
   // Brand Header
@@ -1395,7 +1391,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   brandBadgeText: {
     fontSize: 14,
@@ -1445,7 +1445,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
-    boxShadow: '0 8px 24px rgba(50, 0, 52, 0.08)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
     borderWidth: 1,
     borderColor: 'rgba(50, 0, 52, 0.06)',
   },
@@ -1501,9 +1505,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     height: 50,
     marginTop: 8,
-    boxShadow: '0 8px 20px rgba(50, 0, 52, 0.22)',
-    cursor: 'pointer',
-    borderWidth: 0,
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
   },
   btnDisabled: {
     opacity: 0.7,
@@ -1543,7 +1549,6 @@ const styles = StyleSheet.create({
     height: 46,
     borderWidth: 1,
     borderColor: 'rgba(139, 68, 130, 0.15)',
-    cursor: 'pointer',
   },
   guestBtnText: {
     color: '#8B4482',
@@ -1563,7 +1568,6 @@ const styles = StyleSheet.create({
   footerLinkText: {
     color: '#320034',
     fontWeight: '800',
-    cursor: 'pointer',
   },
 
   // --- WIZARD HEADER ---
@@ -1582,7 +1586,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    cursor: 'pointer',
   },
   stepBadge: {
     backgroundColor: '#FFD7F3',
@@ -1614,7 +1617,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
-    boxShadow: '0 8px 24px rgba(50, 0, 52, 0.08)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
     borderWidth: 1,
     borderColor: 'rgba(50, 0, 52, 0.06)',
   },
@@ -1648,7 +1655,11 @@ const styles = StyleSheet.create({
     borderColor: '#320034',
     position: 'relative',
     backgroundColor: '#E5E7EB',
-    boxShadow: '0 8px 20px rgba(50, 0, 52, 0.2)',
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 5,
     marginBottom: 14,
   },
   photoShowcaseImage: {
@@ -1668,7 +1679,6 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    cursor: 'pointer',
   },
   photoActionButtonsRow: {
     flexDirection: 'row',
@@ -1684,7 +1694,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    cursor: 'pointer',
   },
   photoCameraPill: {
     flexDirection: 'row',
@@ -1695,7 +1704,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    cursor: 'pointer',
   },
   photoUploadPillText: {
     fontSize: 11.5,
@@ -1723,7 +1731,6 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     overflow: 'hidden',
     position: 'relative',
-    cursor: 'pointer',
   },
   presetAvatarBoxActive: {
     borderColor: '#320034',
@@ -1777,13 +1784,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#320034',
     justifyContent: 'center',
     alignItems: 'center',
-    boxShadow: '0 6px 16px rgba(50, 0, 52, 0.3)',
-    cursor: 'pointer',
-    borderWidth: 0,
+    shadowColor: '#320034',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   realMicBtnRecording: {
     backgroundColor: '#EF4444',
-    boxShadow: '0 6px 20px rgba(239, 68, 68, 0.45)',
+    shadowColor: '#EF4444',
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
   },
   realMicBtnDone: {
     backgroundColor: '#059669',
@@ -1820,8 +1831,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 16,
-    cursor: 'pointer',
-    borderWidth: 0,
   },
   playRecordedBtnActive: {
     backgroundColor: '#7C3AED',
@@ -1838,8 +1847,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 16,
-    cursor: 'pointer',
-    borderWidth: 0,
   },
   reRecordBtnText: {
     color: '#BA1A1A',
@@ -1874,7 +1881,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
     gap: 5,
-    cursor: 'pointer',
   },
   langMiniChipSelected: {
     backgroundColor: '#FFF0FA',
@@ -1914,7 +1920,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
-    cursor: 'pointer',
   },
   levelRowSelected: {
     backgroundColor: '#FFF0FA',
@@ -1962,7 +1967,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
-    cursor: 'pointer',
   },
   interestChipSelected: {
     backgroundColor: '#FFF0FA',
@@ -1983,7 +1987,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginVertical: 10,
-    cursor: 'pointer',
   },
   checkboxBox: {
     width: 18,
@@ -2052,6 +2055,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#320034',
     fontWeight: '700',
-    cursor: 'pointer',
   },
 });

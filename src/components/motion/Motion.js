@@ -5,7 +5,7 @@
  */
 
 import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, Image, Animated, StyleSheet, Platform } from 'react-native';
 
 export const AnimatePresence = ({ children }) => <>{children}</>;
 export const motion = {
@@ -15,38 +15,112 @@ export const motion = {
   img: Image,
 };
 
-export const MotionView = React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, ...props }, ref) => {
-  const fadeAnim = useRef(new Animated.Value(initial?.opacity !== undefined ? initial.opacity : 1)).current;
-  const transY = useRef(new Animated.Value(initial?.y !== undefined ? initial.y : 0)).current;
-  const transX = useRef(new Animated.Value(initial?.x !== undefined ? initial.x : 0)).current;
-  const scaleAnim = useRef(new Animated.Value(initial?.scale !== undefined ? initial.scale : 1)).current;
+const sanitizeStyle = (s) => {
+  if (!s) return undefined;
+  if (Platform.OS === 'web') return s;
+  const flat = StyleSheet.flatten(s);
+  if (!flat) return undefined;
+  const { boxShadow, filter, cursor, animationDelay, ...safeStyle } = flat;
+  return safeStyle;
+};
+
+const getInitialNumber = (val, fallback) => {
+  if (val === undefined || val === null) return fallback;
+  if (Array.isArray(val)) return typeof val[0] === 'number' ? val[0] : fallback;
+  if (typeof val === 'number') return val;
+  return fallback;
+};
+
+export const MotionView = React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, variants, custom, ...props }, ref) => {
+  const targetAnimate = (variants && animate && typeof animate === 'string' && variants[animate])
+    ? (typeof variants[animate] === 'function' ? variants[animate](custom) : variants[animate])
+    : (animate || {});
+
+  const initOpacity = getInitialNumber(initial?.opacity, 1);
+  const initY = getInitialNumber(initial?.y, 0);
+  const initX = getInitialNumber(initial?.x, 0);
+  const initScale = getInitialNumber(initial?.scale, 1);
+
+  const fadeAnim = useRef(new Animated.Value(initOpacity)).current;
+  const transY = useRef(new Animated.Value(initY)).current;
+  const transX = useRef(new Animated.Value(initX)).current;
+  const scaleAnim = useRef(new Animated.Value(initScale)).current;
 
   useEffect(() => {
-    if (animate) {
-      const anims = [];
-      if (animate.opacity !== undefined) {
-        anims.push(Animated.timing(fadeAnim, { toValue: animate.opacity, duration: 300, useNativeDriver: true }));
+    let runningAnimation = null;
+    const animList = [];
+
+    const isInfinite = transition?.repeat === Infinity;
+    const duration = (transition?.duration || 0.35) * 1000;
+
+    // Helper for single value or keyframe array
+    const buildAnim = (animVal, val, isSpring = false) => {
+      if (Array.isArray(val)) {
+        if (val.length === 0) return null;
+        const stepTime = duration / Math.max(1, val.length);
+        const steps = val.map(target =>
+          Animated.timing(animVal, {
+            toValue: typeof target === 'number' ? target : parseFloat(target) || 0,
+            duration: stepTime,
+            useNativeDriver: true,
+          })
+        );
+        const seq = Animated.sequence(steps);
+        return isInfinite ? Animated.loop(seq) : seq;
+      } else if (typeof val === 'number') {
+        if (isSpring && !isInfinite) {
+          return Animated.spring(animVal, {
+            toValue: val,
+            friction: transition?.damping || 8,
+            tension: transition?.stiffness || 40,
+            useNativeDriver: true,
+          });
+        }
+        return Animated.timing(animVal, {
+          toValue: val,
+          duration: isInfinite ? duration : 300,
+          useNativeDriver: true,
+        });
       }
-      if (animate.y !== undefined && typeof animate.y === 'number') {
-        anims.push(Animated.spring(transY, { toValue: animate.y, friction: 8, useNativeDriver: true }));
-      }
-      if (animate.x !== undefined && typeof animate.x === 'number') {
-        anims.push(Animated.spring(transX, { toValue: animate.x, friction: 8, useNativeDriver: true }));
-      }
-      if (animate.scale !== undefined && typeof animate.scale === 'number') {
-        anims.push(Animated.spring(scaleAnim, { toValue: animate.scale, friction: 7, useNativeDriver: true }));
-      }
-      if (anims.length > 0) {
-        Animated.parallel(anims).start();
-      }
+      return null;
+    };
+
+    if (targetAnimate.opacity !== undefined) {
+      const a = buildAnim(fadeAnim, targetAnimate.opacity, false);
+      if (a) animList.push(a);
     }
-  }, [animate]);
+    if (targetAnimate.y !== undefined) {
+      const a = buildAnim(transY, targetAnimate.y, true);
+      if (a) animList.push(a);
+    }
+    if (targetAnimate.x !== undefined) {
+      const a = buildAnim(transX, targetAnimate.x, true);
+      if (a) animList.push(a);
+    }
+    if (targetAnimate.scale !== undefined) {
+      const a = buildAnim(scaleAnim, targetAnimate.scale, true);
+      if (a) animList.push(a);
+    }
+
+    if (animList.length > 0) {
+      runningAnimation = Animated.parallel(animList);
+      runningAnimation.start();
+    }
+
+    return () => {
+      if (runningAnimation) {
+        try { runningAnimation.stop(); } catch (e) {}
+      }
+    };
+  }, [targetAnimate]);
+
+  const safeStyle = sanitizeStyle(style);
 
   return (
     <Animated.View
       ref={ref}
       style={[
-        style,
+        safeStyle,
         {
           opacity: fadeAnim,
           transform: [{ translateY: transY }, { translateX: transX }, { scale: scaleAnim }],
@@ -61,7 +135,7 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
 
 export const MotionText = React.forwardRef(({ children, style, initial, animate, exit, transition, whileHover, whileTap, ...props }, ref) => {
   return (
-    <Text ref={ref} style={style} {...props}>
+    <Text ref={ref} style={sanitizeStyle(style)} {...props}>
       {children}
     </Text>
   );
@@ -71,7 +145,7 @@ export const MotionButton = React.forwardRef(({ children, style, onPress, disabl
   return (
     <TouchableOpacity
       ref={ref}
-      style={style}
+      style={sanitizeStyle(style)}
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.8}
@@ -83,7 +157,7 @@ export const MotionButton = React.forwardRef(({ children, style, onPress, disabl
 });
 
 export const MotionImage = React.forwardRef(({ children, style, source, ...props }, ref) => {
-  return <Image ref={ref} style={style} source={source} {...props} />;
+  return <Image ref={ref} style={sanitizeStyle(style)} source={source} {...props} />;
 });
 
 /**
