@@ -1,7 +1,7 @@
 /**
  * ViveTalk Motion for React (Native / Mobile Target)
  * Pure React Native implementation using Animated API for Expo Go, iOS, and Android.
- * Has zero dependency on DOM or web-only packages to prevent Metro resolver errors.
+ * Slower, cinematic easing curves and spring physics.
  */
 
 import React, { useRef, useEffect } from 'react';
@@ -51,7 +51,8 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
     const animList = [];
 
     const isInfinite = transition?.repeat === Infinity;
-    const duration = (transition?.duration || 0.35) * 1000;
+    const duration = (transition?.duration || 0.6) * 1000;
+    const delay = (transition?.delay || 0) * 1000;
 
     // Helper for single value or keyframe array
     const buildAnim = (animVal, val, isSpring = false) => {
@@ -71,14 +72,14 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
         if (isSpring && !isInfinite) {
           return Animated.spring(animVal, {
             toValue: val,
-            friction: transition?.damping || 8,
-            tension: transition?.stiffness || 40,
+            friction: transition?.damping || 18,
+            tension: transition?.stiffness || 25,
             useNativeDriver: true,
           });
         }
         return Animated.timing(animVal, {
           toValue: val,
-          duration: isInfinite ? duration : 300,
+          duration: isInfinite ? duration : (transition?.duration ? transition.duration * 1000 : 550),
           useNativeDriver: true,
         });
       }
@@ -103,7 +104,15 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
     }
 
     if (animList.length > 0) {
-      runningAnimation = Animated.parallel(animList);
+      const parallelAnim = Animated.parallel(animList);
+      if (delay > 0) {
+        runningAnimation = Animated.sequence([
+          Animated.delay(delay),
+          parallelAnim,
+        ]);
+      } else {
+        runningAnimation = parallelAnim;
+      }
       runningAnimation.start();
     }
 
@@ -161,33 +170,39 @@ export const MotionImage = React.forwardRef(({ children, style, source, ...props
 });
 
 /**
- * Pre-configured Motion Spring Presets & Animation Variants
+ * Standard Cubic Easing for Cinematic, Smooth Motion
  */
-export const SPRING_BOUNCY = {
-  type: 'spring',
-  stiffness: 340,
-  damping: 20,
-  mass: 1,
-};
+export const EASE_CINEMATIC = [0.22, 1, 0.36, 1];
+export const EASE_IN_OUT = [0.4, 0, 0.2, 1];
 
+/**
+ * Pre-configured Motion Spring Presets & Animation Variants (Slower & Elegant)
+ */
 export const SPRING_SMOOTH = {
   type: 'spring',
-  stiffness: 220,
-  damping: 26,
-  mass: 1,
+  stiffness: 110,
+  damping: 22,
+  mass: 1.1,
+};
+
+export const SPRING_BOUNCY = {
+  type: 'spring',
+  stiffness: 130,
+  damping: 15,
+  mass: 1.1,
 };
 
 export const SPRING_SNAPPY = {
   type: 'spring',
-  stiffness: 450,
-  damping: 30,
+  stiffness: 180,
+  damping: 22,
 };
 
 export const FADE_IN_UP = {
-  initial: { opacity: 0, y: 24 },
+  initial: { opacity: 0, y: 30 },
   animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -16 },
-  transition: SPRING_SMOOTH,
+  exit: { opacity: 0, y: -20 },
+  transition: { duration: 0.65, ease: EASE_CINEMATIC },
 };
 
 export const SCALE_POP = {
@@ -200,21 +215,24 @@ export const SCALE_POP = {
 export const SLIDE_HORIZONTAL = {
   initial: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? 60 : -60,
+    x: direction > 0 ? 80 : -80,
+    scale: 0.95,
   }),
   animate: {
     opacity: 1,
     x: 0,
-    transition: SPRING_SMOOTH,
+    scale: 1,
+    transition: { duration: 0.6, ease: EASE_CINEMATIC },
   },
   exit: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? -60 : 60,
-    transition: { duration: 0.2 },
+    x: direction > 0 ? -80 : 80,
+    scale: 0.95,
+    transition: { duration: 0.45, ease: EASE_IN_OUT },
   }),
 };
 
-export const STAGGER_CONTAINER = (staggerDelay = 0.08) => ({
+export const STAGGER_CONTAINER = (staggerDelay = 0.14) => ({
   animate: {
     transition: {
       staggerChildren: staggerDelay,
@@ -223,8 +241,8 @@ export const STAGGER_CONTAINER = (staggerDelay = 0.08) => ({
 });
 
 export const HOVER_TAP_BTN = {
-  whileHover: { scale: 1.025, transition: { duration: 0.15 } },
-  whileTap: { scale: 0.96, transition: { duration: 0.1 } },
+  whileHover: { scale: 1.025, transition: { duration: 0.25 } },
+  whileTap: { scale: 0.96, transition: { duration: 0.15 } },
 };
 
 export const PULSE_LOOP = {
@@ -233,13 +251,13 @@ export const PULSE_LOOP = {
     opacity: [0.8, 1, 0.8],
   },
   transition: {
-    duration: 3,
+    duration: 4.5,
     repeat: Infinity,
     ease: 'easeInOut',
   },
 };
 
-export const FLOAT_LOOP = (distance = 6, duration = 3.5) => ({
+export const FLOAT_LOOP = (distance = 6, duration = 4.5) => ({
   animate: {
     y: [-distance, distance, -distance],
   },

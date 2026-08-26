@@ -15,6 +15,7 @@ import {
   SPRING_BOUNCY,
   SPRING_SMOOTH,
   FLOAT_LOOP,
+  EASE_CINEMATIC,
 } from '../components/motion/Motion';
 
 const { width } = Dimensions.get('window');
@@ -57,7 +58,7 @@ const ONBOARDING_SLIDES = [
 
 const slideVariants = {
   enter: (direction) => ({
-    x: direction > 0 ? 70 : -70,
+    x: direction > 0 ? 80 : -80,
     opacity: 0,
     scale: 0.94,
   }),
@@ -66,15 +67,18 @@ const slideVariants = {
     x: 0,
     opacity: 1,
     scale: 1,
-    transition: SPRING_SMOOTH,
+    transition: {
+      duration: 0.65,
+      ease: EASE_CINEMATIC,
+    },
   },
   exit: (direction) => ({
     zIndex: 0,
-    x: direction < 0 ? 70 : -70,
+    x: direction < 0 ? 80 : -80,
     opacity: 0,
     scale: 0.94,
     transition: {
-      duration: 0.22,
+      duration: 0.45,
       ease: 'easeInOut',
     },
   }),
@@ -117,7 +121,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
           x: [0, 15, 0],
           y: [0, -10, 0],
         }}
-        transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
       />
       <MotionView
         style={styles.glowOrbBottom}
@@ -126,7 +130,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
           x: [0, -15, 0],
           y: [0, 15, 0],
         }}
-        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <View style={{ flex: 1, width: '100%', alignItems: 'center', paddingTop: topPadding, paddingBottom: bottomPadding }}>
@@ -137,7 +141,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
               style={styles.brandBadge}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={SPRING_BOUNCY}
+              transition={{ duration: 0.6, ease: EASE_CINEMATIC }}
             >
               <FontAwesome name="globe" size={16} color="#320034" style={{ marginRight: 7 }} />
               <Text style={styles.brandBadgeText}>ViveTalk</Text>
@@ -150,7 +154,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
               whileTap={{ scale: 0.94 }}
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={SPRING_BOUNCY}
+              transition={{ duration: 0.6, ease: EASE_CINEMATIC }}
             >
               <Text style={styles.skipBtnText}>Skip</Text>
             </MotionButton>
@@ -171,13 +175,13 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                 {/* Visual Card */}
                 <MotionView
                   style={styles.visualCard}
-                  whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                  whileHover={{ y: -4, transition: { duration: 0.3 } }}
                 >
                   <View style={styles.visualHeader}>
                     <MotionView
                       style={styles.visualIconBadge}
                       animate={{ rotate: [0, 8, -8, 0] }}
-                      transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+                      transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
                     >
                       <FontAwesome name={slide.icon} size={18} color="#320034" />
                     </MotionView>
@@ -187,22 +191,22 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                     </View>
                   </View>
 
-                  {/* Interactive Chat Simulation with Staggered Entrance */}
+                  {/* Interactive Chat Simulation with Slower Staggered Entrance */}
                   <View style={styles.mockChatBox}>
                     <MotionView
                       style={styles.mockBubbleUser}
-                      initial={{ opacity: 0, x: 30, scale: 0.9 }}
+                      initial={{ opacity: 0, x: 35, scale: 0.92 }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
-                      transition={{ ...SPRING_BOUNCY, delay: 0.12 }}
+                      transition={{ duration: 0.6, delay: 0.25, ease: EASE_CINEMATIC }}
                     >
                       <Text style={styles.mockBubbleUserText}>{slide.bubble1}</Text>
                     </MotionView>
 
                     <MotionView
                       style={styles.mockBubblePartner}
-                      initial={{ opacity: 0, x: -30, scale: 0.9 }}
+                      initial={{ opacity: 0, x: -35, scale: 0.92 }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
-                      transition={{ ...SPRING_BOUNCY, delay: 0.28 }}
+                      transition={{ duration: 0.65, delay: 0.55, ease: EASE_CINEMATIC }}
                     >
                       <Text style={styles.mockBubblePartnerText}>{slide.bubble2}</Text>
                     </MotionView>
@@ -213,8 +217,8 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                     style={styles.tagChip}
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ ...SPRING_BOUNCY, delay: 0.4 }}
-                    {...FLOAT_LOOP(3, 3)}
+                    transition={{ duration: 0.6, delay: 0.8, ease: EASE_CINEMATIC }}
+                    {...FLOAT_LOOP(3, 4.5)}
                   >
                     <Text style={styles.tagChipText}>{slide.chip}</Text>
                   </MotionView>
@@ -223,9 +227,9 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                 {/* Headlines Section */}
                 <MotionView
                   style={styles.contentSection}
-                  initial={{ opacity: 0, y: 16 }}
+                  initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...SPRING_SMOOTH, delay: 0.18 }}
+                  transition={{ duration: 0.65, delay: 0.35, ease: EASE_CINEMATIC }}
                 >
                   <Text style={styles.titleText}>{slide.title}</Text>
                   <Text style={styles.subtitleText}>{slide.subtitle}</Text>
@@ -249,7 +253,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
                     width: idx === currentSlide ? 28 : 8,
                     backgroundColor: idx === currentSlide ? '#320034' : 'rgba(50, 0, 52, 0.15)',
                   }}
-                  transition={SPRING_SMOOTH}
+                  transition={{ duration: 0.45, ease: EASE_CINEMATIC }}
                 />
               ))}
             </View>
@@ -266,7 +270,7 @@ export default function LandingScreen({ onFinishLoading, onDirectSignIn }) {
               </Text>
               <MotionView
                 animate={{ x: [0, 4, 0] }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
               >
                 <FontAwesome
                   name={currentSlide === ONBOARDING_SLIDES.length - 1 ? 'arrow-right' : 'chevron-right'}

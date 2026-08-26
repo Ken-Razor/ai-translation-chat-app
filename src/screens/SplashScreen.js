@@ -1,6 +1,6 @@
 /**
  * ViveTalk Animated Splash Screen
- * Features Motion for React animations with spring physics, radiant aura rings, and shimmer progress.
+ * Slower, cinematic Motion transitions with glowing radiant aura rings and shimmer progress.
  */
 
 import React, { useEffect } from 'react';
@@ -15,10 +15,10 @@ import {
 
 export default function SplashScreen({ onFinish }) {
   useEffect(() => {
-    // Keep splash visible for at least 1.8s for a polished brand impression
+    // Keep splash visible for 3.2s for a luxurious, calm brand presentation
     const timer = setTimeout(() => {
       if (onFinish) onFinish();
-    }, 2000);
+    }, 3200);
 
     return () => clearTimeout(timer);
   }, [onFinish]);
@@ -33,7 +33,7 @@ export default function SplashScreen({ onFinish }) {
           opacity: [0.35, 0.65, 0.35],
           x: [-15, 15, -15],
         }}
-        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
       />
       <MotionView
         style={styles.ambientGlow2}
@@ -42,21 +42,21 @@ export default function SplashScreen({ onFinish }) {
           opacity: [0.3, 0.6, 0.3],
           y: [15, -15, 15],
         }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <View style={styles.contentWrapper}>
         {/* Animated Icon & Radiant Waves */}
         <View style={styles.logoSection}>
-          {/* Outward Pulsing Rings */}
+          {/* Outward Pulsing Ring */}
           <MotionView
             style={styles.pulseRing}
             animate={{
-              scale: [1, 1.6, 2.1],
-              opacity: [0.7, 0.2, 0],
+              scale: [1, 1.65, 2.2],
+              opacity: [0.7, 0.25, 0],
             }}
             transition={{
-              duration: 2.2,
+              duration: 3.4,
               repeat: Infinity,
               ease: 'easeOut',
             }}
@@ -65,16 +65,16 @@ export default function SplashScreen({ onFinish }) {
           {/* Core Logo Capsule */}
           <MotionView
             style={styles.logoBadge}
-            initial={{ scale: 0.5, opacity: 0 }}
+            initial={{ scale: 0.4, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={SPRING_BOUNCY}
-            {...FLOAT_LOOP(4, 3)}
+            {...FLOAT_LOOP(4, 4.5)}
           >
             <FontAwesome name="globe" size={44} color="#FFFFFF" />
             <MotionView
               style={styles.sparkleDot}
-              animate={{ scale: [1, 1.3, 1], opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
+              animate={{ scale: [1, 1.35, 1], opacity: [0.7, 1, 0.7] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
             >
               <FontAwesome name="bolt" size={13} color="#FBBF24" />
             </MotionView>
@@ -83,9 +83,9 @@ export default function SplashScreen({ onFinish }) {
 
         {/* Brand Typography */}
         <MotionView
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.2 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.35 }}
           style={styles.textSection}
         >
           <Text style={styles.brandTitle}>ViveTalk</Text>
@@ -97,7 +97,7 @@ export default function SplashScreen({ onFinish }) {
           style={styles.progressCapsule}
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.4 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.55 }}
         >
           <MotionView
             style={styles.progressBarFill}
@@ -105,7 +105,7 @@ export default function SplashScreen({ onFinish }) {
               x: [-50, 50, -50],
             }}
             transition={{
-              duration: 1.6,
+              duration: 2.4,
               repeat: Infinity,
               ease: 'easeInOut',
             }}
@@ -115,9 +115,9 @@ export default function SplashScreen({ onFinish }) {
         {/* Feature Pills */}
         <MotionView
           style={styles.featurePillsRow}
-          initial={{ opacity: 0, y: 14 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...SPRING_SMOOTH, delay: 0.55 }}
+          transition={{ ...SPRING_SMOOTH, delay: 0.75 }}
         >
           <View style={styles.featurePill}>
             <FontAwesome name="lock" size={11} color="#6B21A8" style={{ marginRight: 5 }} />
@@ -139,7 +139,7 @@ export default function SplashScreen({ onFinish }) {
         style={styles.footer}
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.7 }}
-        transition={{ delay: 0.7, duration: 0.5 }}
+        transition={{ delay: 0.95, duration: 0.8 }}
       >
         <Text style={styles.footerText}>Sayflash AI Studio • Ultra-Low Latency</Text>
       </MotionView>
