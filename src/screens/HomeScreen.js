@@ -60,7 +60,8 @@ const getFlagForLang = (raw) => {
 
 export default function HomeScreen({ user, onNavigateToTab, onStartChatWithUser }) {
   const insets = useSafeAreaInsets();
-  const myEmail = (user?.email || '').toLowerCase();
+  const activeUser = user || authService.getCurrentUser();
+  const myEmail = (activeUser?.email || '').toLowerCase();
   const [registeredUsers, setRegisteredUsers] = useState(() => storageService.getSyncHomeUsers(myEmail));
   const [isRefreshing, setIsRefreshing] = useState(false);
 

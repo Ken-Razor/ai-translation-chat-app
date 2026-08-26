@@ -84,7 +84,7 @@ class AuthService {
   // Fetch all registered users from backend API
   async getAllUsers() {
     try {
-      const res = await fetch("https://vivetalk.sayflash.id/api/users");
+      const res = await fetch(`${getApiBaseUrl()}/users`);
       if (res.ok) {
         const users = await res.json();
         return Array.isArray(users) ? users : [];

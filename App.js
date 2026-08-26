@@ -139,17 +139,30 @@ export default function App() {
   const flatListRef = useRef(null);
   const chatSlideAnim = useRef(new Animated.Value(0)).current;
   const tabAnim = useRef(new Animated.Value(1)).current;
+  const isInitialTabMount = useRef(true);
 
-  // Smooth navbar tab switch animation effect with slower, silky bezier curve
+  // Smooth navbar tab switch animation effect (never goes to 0 opacity to prevent blank states)
   useEffect(() => {
-    tabAnim.setValue(0);
+    if (isInitialTabMount.current) {
+      isInitialTabMount.current = false;
+      tabAnim.setValue(1);
+      return;
+    }
+    tabAnim.setValue(0.7);
     Animated.timing(tabAnim, {
       toValue: 1,
-      duration: 650,
-      easing: Easing.bezier(0.16, 1, 0.3, 1),
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [activeTab]);
+
+  // Ensure tabAnim is 1 when entering home stage
+  useEffect(() => {
+    if (appStage === 'home') {
+      tabAnim.setValue(1);
+    }
+  }, [appStage]);
 
   // Subscribe to IAM auth state changes and restore session on app startup
   useEffect(() => {
@@ -1126,15 +1139,7 @@ export default function App() {
         )}
 
         {stageKey === 'home' && (
-          <MotionView
-            key="home-stage"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.9, ease: EASE_CINEMATIC }}
-            style={{ flex: 1 }}
-          >
-            <View style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
+          <View style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
 
         {/* Tab Navigation State Switcher with Smooth Fluid Transition */}
         <Animated.View
@@ -1465,7 +1470,6 @@ export default function App() {
           onLogout={handleLogout}
         />
             </View>
-          </MotionView>
         )}
       </AnimatePresence>
     </SafeAreaProvider>
