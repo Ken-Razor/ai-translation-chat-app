@@ -44,6 +44,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import MatchesScreen from './src/screens/MatchesScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import BottomNavBar from './src/components/BottomNavBar';
+import { MotionView, AnimatePresence, EASE_CINEMATIC } from './src/components/motion/Motion';
 
 import { authService } from './src/services/authService';
 import { storageService } from './src/services/storageService';
@@ -135,13 +136,13 @@ export default function App() {
   const chatSlideAnim = useRef(new Animated.Value(0)).current;
   const tabAnim = useRef(new Animated.Value(1)).current;
 
-  // Smooth navbar tab switch animation effect
+  // Smooth navbar tab switch animation effect with slower, silky bezier curve
   useEffect(() => {
     tabAnim.setValue(0);
     Animated.timing(tabAnim, {
       toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.poly(3)),
+      duration: 650,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
     }).start();
   }, [activeTab]);
@@ -792,8 +793,8 @@ export default function App() {
     chatSlideAnim.setValue(0);
     Animated.timing(chatSlideAnim, {
       toValue: 1,
-      duration: 260,
-      easing: Easing.out(Easing.poly(4)),
+      duration: 650,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) {
@@ -806,8 +807,8 @@ export default function App() {
   const handleBackToChatList = () => {
     Animated.timing(chatSlideAnim, {
       toValue: 0,
-      duration: 200,
-      easing: Easing.in(Easing.poly(3)),
+      duration: 500,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) {
@@ -1234,71 +1235,88 @@ export default function App() {
 
   console.log('🟢 [App] RENDER — appStage:', appStage, '| currentUser:', currentUser?.email || 'NULL');
 
-  // Step 0: Animated Splash Screen (Powered by Motion for React)
-  if (showSplash || isAuthInitializing) {
-    return (
-      <SafeAreaProvider>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-        <SplashScreen
-          onFinish={() => {
-            setShowSplash(false);
-          }}
-        />
-      </SafeAreaProvider>
-    );
-  }
+  const stageKey = (showSplash || isAuthInitializing)
+    ? 'splash'
+    : appStage === 'landing'
+    ? 'landing'
+    : (!currentUser || appStage === 'login')
+    ? 'login'
+    : 'home';
 
-  // Step 1: Landing Page (Onboarding screen shown on fresh launch when logged out or when user logs out)
-  if (appStage === 'landing') {
-    console.log('🟡 [App] Rendering LandingScreen (onboarding)');
-    return (
-      <SafeAreaProvider>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-        <LandingScreen
-          onFinishLoading={() => {
-            console.log('🟡 [App] LandingScreen onFinishLoading -> setting appStage to login');
-            setAppStage('login');
-          }}
-          onDirectSignIn={() => {
-            console.log('🟡 [App] LandingScreen onDirectSignIn -> setting appStage to login');
-            setAppStage('login');
-          }}
-        />
-      </SafeAreaProvider>
-    );
-  }
-
-  // Step 2: Login Page (Shown when user is not authenticated)
-  if (!currentUser || appStage === 'login') {
-    console.log('🔵 [App] Rendering LoginScreen');
-    return (
-      <SafeAreaProvider>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-        <LoginScreen
-          onLoginSuccess={(user) => {
-              setCurrentUser(user);
-              setAppStage('home');
-            }}
-            onBackToLanding={() => setAppStage('landing')}
-          />
-      </SafeAreaProvider>
-    );
-  }
-
-  // Step 3: Home Page (Chat List / Chat Room after successful login)
-
-  // Step 3: Home Page (Chat List / Chat Room)
-
-  // Step 3: Home Page (Shown after successful login)
-
-  // Step 3: Home Page (Chat List / Chat Room after successful login)
   return (
     <SafeAreaProvider>
-      <View style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
-        <StatusBar
-          barStyle={activeTheme.mode === 'light' ? 'dark-content' : 'light-content'}
-          backgroundColor={activeTheme.bg}
-        />
+      <StatusBar
+        barStyle={stageKey === 'home' && activeTheme.mode === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={stageKey === 'home' ? activeTheme.bg : 'transparent'}
+        translucent={stageKey !== 'home'}
+      />
+      <AnimatePresence mode="wait">
+        {stageKey === 'splash' && (
+          <MotionView
+            key="splash-stage"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.85, ease: EASE_CINEMATIC }}
+            style={{ flex: 1 }}
+          >
+            <SplashScreen
+              onFinish={() => {
+                setShowSplash(false);
+              }}
+            />
+          </MotionView>
+        )}
+
+        {stageKey === 'landing' && (
+          <MotionView
+            key="landing-stage"
+            initial={{ opacity: 0, y: 25 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20, scale: 0.96 }}
+            transition={{ duration: 0.9, ease: EASE_CINEMATIC }}
+            style={{ flex: 1 }}
+          >
+            <LandingScreen
+              onFinishLoading={() => {
+                setAppStage('login');
+              }}
+              onDirectSignIn={() => {
+                setAppStage('login');
+              }}
+            />
+          </MotionView>
+        )}
+
+        {stageKey === 'login' && (
+          <MotionView
+            key="login-stage"
+            initial={{ opacity: 0, y: 25 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20, scale: 0.96 }}
+            transition={{ duration: 0.9, ease: EASE_CINEMATIC }}
+            style={{ flex: 1 }}
+          >
+            <LoginScreen
+              onLoginSuccess={(user) => {
+                setCurrentUser(user);
+                setAppStage('home');
+              }}
+              onBackToLanding={() => setAppStage('landing')}
+            />
+          </MotionView>
+        )}
+
+        {stageKey === 'home' && (
+          <MotionView
+            key="home-stage"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.9, ease: EASE_CINEMATIC }}
+            style={{ flex: 1 }}
+          >
+            <View style={[styles.safeArea, { backgroundColor: activeTheme.bg }]}>
 
         {/* Tab Navigation State Switcher with Smooth Fluid Transition */}
         <Animated.View
@@ -1634,7 +1652,10 @@ export default function App() {
           user={currentUser}
           onLogout={handleLogout}
         />
-      </View>
+            </View>
+          </MotionView>
+        )}
+      </AnimatePresence>
     </SafeAreaProvider>
   );
 }

@@ -1,11 +1,11 @@
 /**
  * ViveTalk Motion for React (Native / Mobile Target)
  * Pure React Native implementation using Animated API for Expo Go, iOS, and Android.
- * Slower, cinematic easing curves and spring physics.
+ * Ultra-smooth, relaxed, and cinematic transition curves.
  */
 
 import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, Animated, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Image, Animated, StyleSheet, Platform, Easing } from 'react-native';
 
 export const AnimatePresence = ({ children }) => <>{children}</>;
 export const motion = {
@@ -51,7 +51,7 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
     const animList = [];
 
     const isInfinite = transition?.repeat === Infinity;
-    const duration = (transition?.duration || 0.6) * 1000;
+    const duration = (transition?.duration || 0.9) * 1000;
     const delay = (transition?.delay || 0) * 1000;
 
     // Helper for single value or keyframe array
@@ -63,6 +63,7 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
           Animated.timing(animVal, {
             toValue: typeof target === 'number' ? target : parseFloat(target) || 0,
             duration: stepTime,
+            easing: Easing.bezier(0.16, 1, 0.3, 1),
             useNativeDriver: true,
           })
         );
@@ -72,14 +73,15 @@ export const MotionView = React.forwardRef(({ children, style, initial, animate,
         if (isSpring && !isInfinite) {
           return Animated.spring(animVal, {
             toValue: val,
-            friction: transition?.damping || 18,
-            tension: transition?.stiffness || 25,
+            friction: transition?.damping || 16,
+            tension: transition?.stiffness || 18,
             useNativeDriver: true,
           });
         }
         return Animated.timing(animVal, {
           toValue: val,
-          duration: isInfinite ? duration : (transition?.duration ? transition.duration * 1000 : 550),
+          duration: isInfinite ? duration : (transition?.duration ? transition.duration * 1000 : 850),
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
           useNativeDriver: true,
         });
       }
@@ -172,67 +174,67 @@ export const MotionImage = React.forwardRef(({ children, style, source, ...props
 /**
  * Standard Cubic Easing for Cinematic, Smooth Motion
  */
-export const EASE_CINEMATIC = [0.22, 1, 0.36, 1];
+export const EASE_CINEMATIC = [0.16, 1, 0.3, 1];
 export const EASE_IN_OUT = [0.4, 0, 0.2, 1];
 
 /**
- * Pre-configured Motion Spring Presets & Animation Variants (Slower & Elegant)
+ * Pre-configured Motion Spring Presets & Animation Variants (Noticeably Slower & Luxurious)
  */
 export const SPRING_SMOOTH = {
   type: 'spring',
-  stiffness: 110,
-  damping: 22,
-  mass: 1.1,
+  stiffness: 70,
+  damping: 20,
+  mass: 1.2,
 };
 
 export const SPRING_BOUNCY = {
   type: 'spring',
-  stiffness: 130,
-  damping: 15,
-  mass: 1.1,
+  stiffness: 85,
+  damping: 14,
+  mass: 1.2,
 };
 
 export const SPRING_SNAPPY = {
   type: 'spring',
-  stiffness: 180,
-  damping: 22,
+  stiffness: 120,
+  damping: 18,
 };
 
 export const FADE_IN_UP = {
-  initial: { opacity: 0, y: 30 },
+  initial: { opacity: 0, y: 36 },
   animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -20 },
-  transition: { duration: 0.65, ease: EASE_CINEMATIC },
+  exit: { opacity: 0, y: -24 },
+  transition: { duration: 0.95, ease: EASE_CINEMATIC },
 };
 
 export const SCALE_POP = {
-  initial: { opacity: 0, scale: 0.85 },
+  initial: { opacity: 0, scale: 0.82 },
   animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.9 },
+  exit: { opacity: 0, scale: 0.88 },
   transition: SPRING_BOUNCY,
 };
 
 export const SLIDE_HORIZONTAL = {
   initial: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? 80 : -80,
-    scale: 0.95,
+    x: direction > 0 ? 100 : -100,
+    scale: 0.94,
   }),
   animate: {
     opacity: 1,
     x: 0,
     scale: 1,
-    transition: { duration: 0.6, ease: EASE_CINEMATIC },
+    transition: { duration: 0.95, ease: EASE_CINEMATIC },
   },
   exit: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? -80 : 80,
-    scale: 0.95,
-    transition: { duration: 0.45, ease: EASE_IN_OUT },
+    x: direction > 0 ? -100 : 100,
+    scale: 0.94,
+    transition: { duration: 0.65, ease: EASE_IN_OUT },
   }),
 };
 
-export const STAGGER_CONTAINER = (staggerDelay = 0.14) => ({
+export const STAGGER_CONTAINER = (staggerDelay = 0.2) => ({
   animate: {
     transition: {
       staggerChildren: staggerDelay,
@@ -241,8 +243,8 @@ export const STAGGER_CONTAINER = (staggerDelay = 0.14) => ({
 });
 
 export const HOVER_TAP_BTN = {
-  whileHover: { scale: 1.025, transition: { duration: 0.25 } },
-  whileTap: { scale: 0.96, transition: { duration: 0.15 } },
+  whileHover: { scale: 1.025, transition: { duration: 0.3 } },
+  whileTap: { scale: 0.96, transition: { duration: 0.2 } },
 };
 
 export const PULSE_LOOP = {
@@ -251,13 +253,13 @@ export const PULSE_LOOP = {
     opacity: [0.8, 1, 0.8],
   },
   transition: {
-    duration: 4.5,
+    duration: 5.5,
     repeat: Infinity,
     ease: 'easeInOut',
   },
 };
 
-export const FLOAT_LOOP = (distance = 6, duration = 4.5) => ({
+export const FLOAT_LOOP = (distance = 6, duration = 5.5) => ({
   animate: {
     y: [-distance, distance, -distance],
   },

@@ -1,7 +1,7 @@
 /**
  * ViveTalk Motion for React (Web Target)
  * Powered by motion.dev (motion/react) for Web Browser and PWA.
- * Slower, cinematic easing curves and spring physics.
+ * Ultra-smooth, relaxed, and cinematic transition curves.
  */
 
 import React from 'react';
@@ -27,69 +27,69 @@ export const MotionImage = React.forwardRef(({ style, ...props }, ref) => (
 export { motion, AnimatePresence };
 
 /**
- * Standard Cubic Easing for Cinematic, Smooth Motion
+ * Ultra-Smooth Exponential Deceleration Curve (Velvety, Relaxed Pacing)
  */
-export const EASE_CINEMATIC = [0.22, 1, 0.36, 1]; // Smooth deceleration
+export const EASE_CINEMATIC = [0.16, 1, 0.3, 1];
 export const EASE_IN_OUT = [0.4, 0, 0.2, 1];
 
 /**
- * Pre-configured Motion Spring Presets & Animation Variants (Slower & Elegant)
+ * Pre-configured Motion Spring Presets & Animation Variants (Noticeably Slower & Luxurious)
  */
 export const SPRING_SMOOTH = {
   type: 'spring',
-  stiffness: 110,
-  damping: 22,
-  mass: 1.1,
+  stiffness: 70,
+  damping: 20,
+  mass: 1.2,
 };
 
 export const SPRING_BOUNCY = {
   type: 'spring',
-  stiffness: 130,
-  damping: 15,
-  mass: 1.1,
+  stiffness: 85,
+  damping: 14,
+  mass: 1.2,
 };
 
 export const SPRING_SNAPPY = {
   type: 'spring',
-  stiffness: 180,
-  damping: 22,
+  stiffness: 120,
+  damping: 18,
 };
 
 export const FADE_IN_UP = {
-  initial: { opacity: 0, y: 30 },
+  initial: { opacity: 0, y: 36 },
   animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -20 },
-  transition: { duration: 0.65, ease: EASE_CINEMATIC },
+  exit: { opacity: 0, y: -24 },
+  transition: { duration: 0.95, ease: EASE_CINEMATIC },
 };
 
 export const SCALE_POP = {
-  initial: { opacity: 0, scale: 0.85 },
+  initial: { opacity: 0, scale: 0.82 },
   animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.9 },
+  exit: { opacity: 0, scale: 0.88 },
   transition: SPRING_BOUNCY,
 };
 
 export const SLIDE_HORIZONTAL = {
   initial: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? 80 : -80,
-    scale: 0.95,
+    x: direction > 0 ? 100 : -100,
+    scale: 0.94,
   }),
   animate: {
     opacity: 1,
     x: 0,
     scale: 1,
-    transition: { duration: 0.6, ease: EASE_CINEMATIC },
+    transition: { duration: 0.95, ease: EASE_CINEMATIC },
   },
   exit: (direction = 1) => ({
     opacity: 0,
-    x: direction > 0 ? -80 : 80,
-    scale: 0.95,
-    transition: { duration: 0.45, ease: EASE_IN_OUT },
+    x: direction > 0 ? -100 : 100,
+    scale: 0.94,
+    transition: { duration: 0.65, ease: EASE_IN_OUT },
   }),
 };
 
-export const STAGGER_CONTAINER = (staggerDelay = 0.14) => ({
+export const STAGGER_CONTAINER = (staggerDelay = 0.2) => ({
   animate: {
     transition: {
       staggerChildren: staggerDelay,
@@ -98,8 +98,8 @@ export const STAGGER_CONTAINER = (staggerDelay = 0.14) => ({
 });
 
 export const HOVER_TAP_BTN = {
-  whileHover: { scale: 1.025, transition: { duration: 0.25 } },
-  whileTap: { scale: 0.96, transition: { duration: 0.15 } },
+  whileHover: { scale: 1.025, transition: { duration: 0.3 } },
+  whileTap: { scale: 0.96, transition: { duration: 0.2 } },
 };
 
 export const PULSE_LOOP = {
@@ -108,13 +108,13 @@ export const PULSE_LOOP = {
     opacity: [0.8, 1, 0.8],
   },
   transition: {
-    duration: 4.5,
+    duration: 5.5,
     repeat: Infinity,
     ease: 'easeInOut',
   },
 };
 
-export const FLOAT_LOOP = (distance = 6, duration = 4.5) => ({
+export const FLOAT_LOOP = (distance = 6, duration = 5.5) => ({
   animate: {
     y: [-distance, distance, -distance],
   },

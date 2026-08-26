@@ -68,25 +68,25 @@ const PRESET_AVATARS = [
 
 const stepVariants = {
   enter: (direction) => ({
-    x: direction > 0 ? 65 : -65,
+    x: direction > 0 ? 80 : -80,
     opacity: 0,
-    scale: 0.95,
+    scale: 0.94,
   }),
   center: {
     x: 0,
     opacity: 1,
     scale: 1,
     transition: {
-      duration: 0.65,
+      duration: 0.95,
       ease: EASE_CINEMATIC,
     },
   },
   exit: (direction) => ({
-    x: direction < 0 ? 65 : -65,
+    x: direction < 0 ? 80 : -80,
     opacity: 0,
-    scale: 0.95,
+    scale: 0.94,
     transition: {
-      duration: 0.45,
+      duration: 0.65,
       ease: 'easeInOut',
     },
   }),
@@ -488,7 +488,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
           scale: [1, 1.2, 1],
           x: [-15, 15, -15],
         }}
-        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
       />
       <MotionView
         style={styles.glowOrbBottom}
@@ -496,7 +496,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
           scale: [1.15, 1, 1.15],
           y: [15, -15, 15],
         }}
-        transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 13, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <View style={[styles.safeArea, { paddingTop: topPadding, paddingBottom: bottomPadding }]}>
@@ -512,10 +512,10 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                 ======================================================== */
                 <MotionView
                   key="signin"
-                  initial={{ opacity: 0, y: 28, scale: 0.96 }}
+                  initial={{ opacity: 0, y: 32, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -20, scale: 0.96 }}
-                  transition={{ duration: 0.7, ease: EASE_CINEMATIC }}
+                  exit={{ opacity: 0, y: -24, scale: 0.95 }}
+                  transition={{ duration: 0.95, ease: EASE_CINEMATIC }}
                   style={[styles.viewBlock, { flex: 1, justifyContent: 'center' }]}
                 >
                   {/* Brand Mark Header */}
@@ -534,9 +534,9 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                   {/* Title & Subtitle */}
                   <MotionView
                     style={styles.titleSection}
-                    initial={{ opacity: 0, y: 14 }}
+                    initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.65, delay: 0.15, ease: EASE_CINEMATIC }}
+                    transition={{ duration: 0.85, delay: 0.2, ease: EASE_CINEMATIC }}
                   >
                     <Text style={styles.displayTitle}>Welcome Back</Text>
                     <Text style={styles.displaySub}>Sign in to continue your global language exchange.</Text>
@@ -547,7 +547,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                     <MotionView
                       style={styles.errorBanner}
                       animate={{ x: [-8, 8, -6, 6, -3, 3, 0] }}
-                      transition={{ duration: 0.5 }}
+                      transition={{ duration: 0.55 }}
                     >
                       <FontAwesome name="exclamation-circle" size={16} color="#BA1A1A" style={{ marginRight: 8 }} />
                       <Text style={styles.errorText}>{errorMsg}</Text>
@@ -557,9 +557,9 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                   {/* Form Card */}
                   <MotionView
                     style={styles.formCard}
-                    initial={{ opacity: 0, y: 20 }}
+                    initial={{ opacity: 0, y: 24 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.7, delay: 0.25, ease: EASE_CINEMATIC }}
+                    transition={{ duration: 0.9, delay: 0.3, ease: EASE_CINEMATIC }}
                   >
                     {/* Email Input */}
                     <View style={styles.inputBlock}>
@@ -644,7 +644,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                     style={styles.footerSection}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ delay: 0.45, duration: 0.6 }}
+                    transition={{ delay: 0.55, duration: 0.8 }}
                   >
                     <Text style={styles.footerPrompt}>
                       Don't have an account?{' '}
@@ -667,10 +667,10 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                 ======================================================== */
                 <MotionView
                   key="signup"
-                  initial={{ opacity: 0, x: 45 }}
+                  initial={{ opacity: 0, x: 60 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -45 }}
-                  transition={{ duration: 0.65, ease: EASE_CINEMATIC }}
+                  exit={{ opacity: 0, x: -60 }}
+                  transition={{ duration: 0.95, ease: EASE_CINEMATIC }}
                   style={[styles.viewBlock, { flex: 1 }]}
                 >
                   {/* Top Navigation Row: Back Button & Step Progress */}
@@ -703,7 +703,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                     <MotionView
                       style={styles.errorBanner}
                       animate={{ x: [-8, 8, -6, 6, -3, 3, 0] }}
-                      transition={{ duration: 0.5 }}
+                      transition={{ duration: 0.55 }}
                     >
                       <FontAwesome name="exclamation-circle" size={16} color="#BA1A1A" style={{ marginRight: 8 }} />
                       <Text style={styles.errorText}>{errorMsg}</Text>
@@ -761,7 +761,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                                 style={styles.handlePreview}
                                 initial={{ opacity: 0, y: -4 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.4 }}
+                                transition={{ duration: 0.6 }}
                               >
                                 <Text style={styles.handlePreviewText}>Preview: @{username}</Text>
                               </MotionView>
@@ -800,7 +800,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                             {/* Showcase Ring with Float */}
                             <MotionView
                               style={styles.photoShowcaseRing}
-                              {...FLOAT_LOOP(4, 4.5)}
+                              {...FLOAT_LOOP(4, 5.5)}
                             >
                               <Image source={{ uri: selectedAvatar }} style={styles.photoShowcaseImage} />
                               <TouchableOpacity
@@ -900,7 +900,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                                     scale: [1, 1.45, 1.9],
                                     opacity: [0.8, 0.4, 0],
                                   }}
-                                  transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+                                  transition={{ duration: 3.0, repeat: Infinity, ease: 'easeOut' }}
                                 />
                               )}
 
@@ -914,7 +914,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                                 whileHover={{ scale: 1.06 }}
                                 whileTap={{ scale: 0.92 }}
                                 animate={{ scale: isRecording ? [1, 1.08, 1] : 1 }}
-                                transition={{ duration: 1.2, repeat: isRecording ? Infinity : 0 }}
+                                transition={{ duration: 1.6, repeat: isRecording ? Infinity : 0 }}
                               >
                                 <FontAwesome
                                   name={isRecording ? 'stop' : recordedVoiceUri ? 'check' : 'microphone'}
@@ -942,9 +942,9 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                                     height: isRecording ? [baseH, baseH + 18, baseH] : recordedVoiceUri ? baseH : 6,
                                   }}
                                   transition={{
-                                    duration: 1.0,
+                                    duration: 1.4,
                                     repeat: isRecording ? Infinity : 0,
-                                    delay: idx * 0.12,
+                                    delay: idx * 0.16,
                                   }}
                                 />
                               ))}
@@ -1271,7 +1271,7 @@ export default function LoginScreen({ onLoginSuccess, onBackToLanding }) {
                             <MotionView
                               style={styles.otpIconBadge}
                               animate={{ scale: [1, 1.1, 1] }}
-                              transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+                              transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
                             >
                               <FontAwesome name="envelope-open-o" size={26} color="#320034" />
                             </MotionView>
