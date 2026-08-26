@@ -33,6 +33,7 @@ import IncomingCallModal from './src/components/IncomingCallModal';
 import MediaPickerSheet from './src/components/MediaPickerSheet';
 import ImageViewerModal from './src/components/ImageViewerModal';
 
+import SplashScreen from './src/screens/SplashScreen';
 import LandingScreen from './src/screens/LandingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
@@ -79,7 +80,8 @@ export default function App() {
   const [themePreference, setThemePreference] = useState('dark');
   const activeTheme = getTheme(themePreference, systemColorScheme);
 
-  // Navigation Flow: 'landing' -> (autoLogin restore or LoginScreen) -> 'home'
+  // Navigation Flow: 'splash' -> 'landing' -> (autoLogin restore or LoginScreen) -> 'home'
+  const [showSplash, setShowSplash] = useState(true);
   const [appStage, setAppStage] = useState('landing');
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthInitializing, setIsAuthInitializing] = useState(true);
@@ -1232,16 +1234,16 @@ export default function App() {
 
   console.log('🟢 [App] RENDER — appStage:', appStage, '| currentUser:', currentUser?.email || 'NULL');
 
-  // Show loading splash while auth is initializing
-  if (isAuthInitializing) {
+  // Step 0: Animated Splash Screen (Powered by Motion for React)
+  if (showSplash || isAuthInitializing) {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={[styles.safeArea, { backgroundColor: '#f8f9fa' }]}>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-            <Text style={{ fontSize: 28, fontWeight: '900', color: '#320034' }}>ViveTalk</Text>
-            <Text style={{ fontSize: 13, color: '#4f434c', marginTop: 8 }}>Loading...</Text>
-          </View>
-        </SafeAreaView>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SplashScreen
+          onFinish={() => {
+            setShowSplash(false);
+          }}
+        />
       </SafeAreaProvider>
     );
   }
